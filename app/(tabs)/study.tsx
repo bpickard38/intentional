@@ -64,6 +64,21 @@ export default function StudyScreen() {
       setJournalLearned(sess.journal?.learned ?? "");
       setJournalFelt(sess.journal?.felt ?? "");
       setJournalAction(sess.journal?.action ?? "");
+    } catch (_err) {
+      const plan = fallbackPlan(durationMin, topic.trim() || "Faith");
+      const sess: StudySession = {
+        id: "session-" + Date.now(),
+        date: todayKey(),
+        durationMin,
+        topic: topic.trim() || "Faith",
+        plan,
+        createdAt: new Date().toISOString(),
+      };
+      await addSession(sess).catch(() => {});
+      setSession(sess);
+      setJournalLearned("");
+      setJournalFelt("");
+      setJournalAction("");
     } finally {
       setLoading(false);
     }
@@ -133,7 +148,7 @@ export default function StudyScreen() {
       {loading && !plan ? null : plan ? (
         <>
           <Text style={styles.sectionTitle}>Scriptures</Text>
-          {plan.scriptures.map((s, i) => (
+          {(plan.scriptures ?? []).map((s, i) => (
             <View key={i} style={styles.card}>
               <Text style={styles.cardTitle}>{s.title} — {s.ref}</Text>
               <Text style={styles.cardSummary}>{s.summary}</Text>
@@ -144,7 +159,7 @@ export default function StudyScreen() {
           ))}
 
           <Text style={styles.sectionTitle}>Talks</Text>
-          {plan.talks.map((t, i) => (
+          {(plan.talks ?? []).map((t, i) => (
             <View key={i} style={styles.card}>
               <Text style={styles.cardTitle}>{t.title}</Text>
               {t.speaker ? <Text style={styles.cardMeta}>{t.speaker}</Text> : null}
@@ -158,7 +173,7 @@ export default function StudyScreen() {
           {plan.articles && plan.articles.length > 0 ? (
             <>
               <Text style={styles.sectionTitle}>Articles</Text>
-              {plan.articles.map((a, i) => (
+              {(plan.articles ?? []).map((a, i) => (
                 <View key={i} style={styles.card}>
                   <Text style={styles.cardTitle}>{a.title}</Text>
                   <Text style={styles.cardSummary}>{a.summary}</Text>
@@ -171,12 +186,12 @@ export default function StudyScreen() {
           ) : null}
 
           <Text style={styles.sectionTitle}>Reflection prompts</Text>
-          {plan.reflectionPrompts.map((p, i) => (
+          {(plan.reflectionPrompts ?? []).map((p, i) => (
             <Text key={i} style={styles.prompt}>• {p}</Text>
           ))}
 
           <Text style={styles.sectionTitle}>Action step</Text>
-          <Text style={styles.actionStep}>{plan.actionStep}</Text>
+          <Text style={styles.actionStep}>{plan.actionStep ?? "Reflect and choose one action."}</Text>
 
           <Text style={styles.sectionTitle}>Journal</Text>
           <Text style={styles.journalLabel}>What I learned</Text>
