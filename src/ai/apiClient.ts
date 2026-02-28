@@ -58,20 +58,35 @@ export async function generateStudyPlan(
   faithTradition: FaithTradition
 ): Promise<StudyPlan> {
   if (!API_URL) throw new Error("EXPO_PUBLIC_API_URL is not set");
-  const res = await fetch(`${API_URL}/api/generate-study-session`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-    },
-    body: JSON.stringify({
-      durationMin,
-      topic,
-      faithTradition,
-      requestId: Date.now(),
-    }),
-  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/generate-study-session`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      body: JSON.stringify({
+        durationMin,
+        topic,
+        faithTradition,
+        requestId: Date.now(),
+      }),
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("abort")) throw new Error("Request timed out");
+    throw new Error("Network request failed. Check API URL (use your computer's IP on device/emulator).");
+  }
+  clearTimeout(timeoutId);
+
   if (!res.ok) throw new Error("API request failed: " + res.status);
   let data: unknown;
   try {

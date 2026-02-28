@@ -29,6 +29,8 @@ export default function StudyScreen() {
   const [topic, setTopic] = useState("");
   const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<StudySession | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [usedFallback, setUsedFallback] = useState(false);
   const [journalLearned, setJournalLearned] = useState("");
   const [journalFelt, setJournalFelt] = useState("");
   const [journalAction, setJournalAction] = useState("");
@@ -43,12 +45,19 @@ export default function StudyScreen() {
     const t = topic.trim() || "Faith";
     setLoading(true);
     setSession(null);
+    setApiError(null);
+    setUsedFallback(false);
     try {
       const profile = await loadProfile();
       let plan: StudyPlan;
       try {
         plan = await generateStudyPlan(durationMin, t, profile.faithTradition);
-      } catch {
+        setUsedFallback(false);
+        setApiError(null);
+      } catch (apiErr) {
+        const msg = apiErr instanceof Error ? apiErr.message : String(apiErr);
+        setApiError(msg);
+        setUsedFallback(true);
         plan = fallbackPlan(durationMin, t);
       }
       const sess: StudySession = {
@@ -65,6 +74,8 @@ export default function StudyScreen() {
       setJournalFelt(sess.journal?.felt ?? "");
       setJournalAction(sess.journal?.action ?? "");
     } catch (_err) {
+      setUsedFallback(true);
+      setApiError("Something went wrong");
       const plan = fallbackPlan(durationMin, topic.trim() || "Faith");
       const sess: StudySession = {
         id: "session-" + Date.now(),
@@ -143,6 +154,18 @@ export default function StudyScreen() {
             <Text style={styles.genBtnText}>Generate</Text>
           )}
         </Pressable>
+      ) : null}
+
+      {plan && usedFallback ? (
+        <View style={styles.fallbackBanner}>
+          <Text style={styles.fallbackBannerText}>Offline plan (API unavailable)</Text>
+          {apiError ? <Text style={styles.fallbackErrorText}>{apiError}</Text> : null}
+        </View>
+      ) : null}
+      {plan && !usedFallback ? (
+        <View style={styles.apiOkBanner}>
+          <Text style={styles.apiOkBannerText}>Generated from API</Text>
+        </View>
       ) : null}
 
       {loading && !plan ? null : plan ? (
@@ -270,6 +293,11 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   genBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  fallbackBanner: { backgroundColor: "#fff3cd", padding: 10, borderRadius: 8, marginBottom: 12 },
+  fallbackBannerText: { fontSize: 14, fontWeight: "600", color: "#856404" },
+  fallbackErrorText: { fontSize: 12, color: "#856404", marginTop: 4 },
+  apiOkBanner: { backgroundColor: "#d4edda", padding: 10, borderRadius: 8, marginBottom: 12 },
+  apiOkBannerText: { fontSize: 14, fontWeight: "600", color: "#155724" },
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 8 },
   card: { borderWidth: 1, borderColor: "#eee", borderRadius: 12, padding: 14, marginBottom: 10 },
   cardTitle: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
