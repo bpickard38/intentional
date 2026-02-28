@@ -1,98 +1,263 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  FlatList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import type { Habit, HabitLog, HabitSchedule } from "@/src/core/types";
+import {
+  listHabits,
+  addHabit,
+  toggleHabitCompleteToday,
+  getTodayHabitLog,
+  getTodayProgress,
+  getWeeklyProgress,
+  getAllLogs,
+} from "@/src/habits/habitService";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function TodayScreen() {
+  const router = useRouter();
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [log, setLog] = useState<HabitLog | null>(null);
+  const [allLogs, setAllLogs] = useState<HabitLog[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [scheduleType, setScheduleType] = useState<"daily" | "weekly">("daily");
+  const [targetPerWeek, setTargetPerWeek] = useState("3");
 
-export default function HomeScreen() {
+  const load = useCallback(async () => {
+    const [h, l, logs] = await Promise.all([
+      listHabits(),
+      getTodayHabitLog(),
+      getAllLogs(),
+    ]);
+    setHabits(h);
+    setLog(l);
+    setAllLogs(logs);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
+
+  const progress = log ? getTodayProgress(habits, log) : { done: 0, total: 0, percent: 0 };
+  const weekly = getWeeklyProgress(habits, allLogs);
+
+  async function toggle(habitId: string) {
+    const updated = await toggleHabitCompleteToday(habitId);
+    setLog(updated);
+    const logs = await getAllLogs();
+    setAllLogs(logs);
+  }
+
+  async function handleAddHabit() {
+    const name = newName.trim();
+    if (!name) return;
+    const schedule: HabitSchedule =
+      scheduleType === "daily"
+        ? { type: "daily" }
+        : { type: "weekly", targetPerWeek: Math.max(1, parseInt(targetPerWeek, 10) || 3) };
+    await addHabit(name, schedule);
+    setNewName("");
+    setScheduleType("daily");
+    setTargetPerWeek("3");
+    setModalVisible(false);
+    load();
+  }
+
+  const dailyHabits = habits.filter((h) => h.schedule.type === "daily");
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <View style={styles.container}>
+      <Text style={styles.title}>Today</Text>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <View style={styles.progressRow}>
+        <Text style={styles.progressText}>
+          {progress.done}/{progress.total} done
+          {progress.total > 0 ? ` • ${progress.percent}%` : ""}
+        </Text>
+      </View>
+
+      {weekly.targetThisWeek > 0 && (
+        <Text style={styles.weeklyText}>
+          Weekly: {weekly.doneThisWeek}/{weekly.targetThisWeek}
+        </Text>
+      )}
+
+      <FlatList
+        data={dailyHabits}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        renderItem={({ item }) => {
+          const isDone = log?.completedHabitIds.includes(item.id) ?? false;
+          return (
+            <Pressable
+              onPress={() => toggle(item.id)}
+              style={[styles.card, isDone && styles.cardDone]}
+            >
+              <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
+                {isDone ? <Text style={styles.check}>✓</Text> : null}
+              </View>
+              <Text style={[styles.itemText, isDone && styles.itemTextDone]}>
+                {item.name}
+              </Text>
+            </Pressable>
+          );
+        }}
+      />
+
+      <Pressable onPress={() => setModalVisible(true)} style={styles.addBtn}>
+        <Text style={styles.addBtnText}>Add habit</Text>
+      </Pressable>
+
+      <Pressable
+        onPress={() => router.push("/study")}
+        style={styles.studyBtn}
+      >
+        <Text style={styles.studyBtnText}>Start Study Session</Text>
+      </Pressable>
+
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setModalVisible(false)}>
+          <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>New habit</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Habit name"
+              value={newName}
+              onChangeText={setNewName}
+              autoCapitalize="words"
+            />
+            <View style={styles.scheduleRow}>
+              <Pressable
+                onPress={() => setScheduleType("daily")}
+                style={[styles.scheduleBtn, scheduleType === "daily" && styles.scheduleBtnActive]}
+              >
+                <Text style={scheduleType === "daily" ? styles.scheduleBtnTextActive : undefined}>
+                  Daily
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setScheduleType("weekly")}
+                style={[styles.scheduleBtn, scheduleType === "weekly" && styles.scheduleBtnActive]}
+              >
+                <Text style={scheduleType === "weekly" ? styles.scheduleBtnTextActive : undefined}>
+                  Weekly
+                </Text>
+              </Pressable>
+            </View>
+            {scheduleType === "weekly" && (
+              <TextInput
+                style={styles.input}
+                placeholder="Target per week (e.g. 3)"
+                value={targetPerWeek}
+                onChangeText={setTargetPerWeek}
+                keyboardType="number-pad"
+              />
+            )}
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setModalVisible(false)} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={handleAddHabit} style={styles.saveBtn}>
+                <Text style={styles.saveBtnText}>Save</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: { flex: 1, padding: 20, paddingTop: 48, backgroundColor: "#fff" },
+  title: { fontSize: 28, fontWeight: "800", marginBottom: 16 },
+  progressRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
+  progressText: { fontSize: 16, fontWeight: "600" },
+  weeklyText: { fontSize: 14, color: "#666", marginBottom: 12 },
+  listContent: { paddingBottom: 16 },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#eee",
+    marginBottom: 10,
   },
-  stepContainer: {
-    gap: 8,
+  cardDone: { borderColor: "#cfc" },
+  checkbox: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#bbb",
+    marginRight: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxDone: { borderColor: "#2b8a3e" },
+  check: { fontSize: 16, fontWeight: "900" },
+  itemText: { fontSize: 16, fontWeight: "600" },
+  itemTextDone: { textDecorationLine: "line-through", opacity: 0.6 },
+  addBtn: {
+    paddingVertical: 10,
     marginBottom: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    alignItems: "center",
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  addBtnText: { fontSize: 15, fontWeight: "600" },
+  studyBtn: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    backgroundColor: "#0a7ea4",
   },
+  studyBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalBox: { backgroundColor: "#fff", borderRadius: 16, padding: 20 },
+  modalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 12 },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  scheduleRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
+  scheduleBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  scheduleBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
+  scheduleBtnTextActive: { fontWeight: "700", color: "#0a7ea4" },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 8 },
+  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
+  cancelBtnText: { fontSize: 16, fontWeight: "600" },
+  saveBtn: { paddingVertical: 10, paddingHorizontal: 20, backgroundColor: "#0a7ea4", borderRadius: 10 },
+  saveBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
 });

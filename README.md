@@ -48,3 +48,12 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Local Dev
+
+- **Start the app:** `npm start` (or `npx expo start`).
+
+- **API URL:** The app calls a backend at `EXPO_PUBLIC_API_URL` for generating study sessions (e.g. `/api/generate-study-session`). Set it in `.env`:
+  - **Local:** `EXPO_PUBLIC_API_URL=http://localhost:3000` (or your dev server URL).
+  - **Production:** Set `EXPO_PUBLIC_API_URL` to your production API base URL (e.g. `https://api.yourdomain.com`).
+  If the variable is missing or the request fails, the app falls back to a mocked study plan so it works offline.
