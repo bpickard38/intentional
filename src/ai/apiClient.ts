@@ -1,8 +1,6 @@
 import type { StudyPlan } from "@/src/core/types";
 import type { FaithTradition } from "@/src/core/types";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
 function ensureArray<T>(v: unknown, def: T[]): T[] {
   if (Array.isArray(v)) return v as T[];
   return def;
@@ -57,14 +55,17 @@ export async function generateStudyPlan(
   topic: string,
   faithTradition: FaithTradition
 ): Promise<StudyPlan> {
-  if (!API_URL) throw new Error("EXPO_PUBLIC_API_URL is not set");
+  const base = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") || "";
+  if (!base) throw new Error("EXPO_PUBLIC_API_URL is not set");
+
+  const url = `${base}/api/generate-study-session`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}/api/generate-study-session`, {
+    res = await fetch(url, {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -82,12 +83,12 @@ export async function generateStudyPlan(
   } catch (err) {
     clearTimeout(timeoutId);
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("abort")) throw new Error("Request timed out");
-    throw new Error("Network request failed. Check API URL (use your computer's IP on device/emulator).");
+    if (message.includes("abort")) throw new Error("Request timed out (45s). URL: " + url);
+    throw new Error("Network request failed. URL: " + url);
   }
   clearTimeout(timeoutId);
 
-  if (!res.ok) throw new Error("API request failed: " + res.status);
+  if (!res.ok) throw new Error("API request failed: " + res.status + " URL: " + url);
   let data: unknown;
   try {
     data = await res.json();

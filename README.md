@@ -57,3 +57,19 @@ Join our community of developers creating universal apps.
   - **Local:** `EXPO_PUBLIC_API_URL=http://localhost:3000` (or your dev server URL).
   - **Production:** Set `EXPO_PUBLIC_API_URL` to your production API base URL (e.g. `https://api.yourdomain.com`).
   If the variable is missing or the request fails, the app falls back to a mocked study plan so it works offline.
+
+### "Network request failed" / API unavailable
+
+- The app now shows the **exact URL** it’s calling in the error banner (e.g. `URL: https://your-api.vercel.app/api/generate-study-session`). Test that URL in a browser or with curl to confirm the backend responds.
+- **No trailing slash:** Use `https://your-app.vercel.app` not `https://your-app.vercel.app/`.
+- **Restart Expo** after changing `.env` (`npx expo start`), then reload the app (shake device → Reload, or refresh in web).
+- **Expo Web (browser):** The backend must allow CORS. In your API handler, send CORS headers and handle `OPTIONS`:
+
+  ```js
+  // At the start of your handler (e.g. Next.js API route or Vercel serverless):
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  ```
+- **Device/emulator:** If you use a local backend (e.g. `http://localhost:3000`), on Android emulator use `http://10.0.2.2:3000`; on a physical device use your computer’s LAN IP (e.g. `http://192.168.1.x:3000`).
