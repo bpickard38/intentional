@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import type { Habit, HabitLog, HabitSchedule } from "@/src/core/types";
+import { todayKey } from "@/src/core/dates";
 import {
   listHabits,
   addHabit,
@@ -73,6 +74,20 @@ export default function TodayScreen() {
   }
 
   const dailyHabits = habits.filter((h) => h.schedule.type === "daily");
+  const weeklyHabits = habits.filter((h) => h.schedule.type === "weekly");
+
+  function getWeeklyCountForHabit(habitId: string): number {
+    const key = todayKey();
+    return allLogs.filter((l) => {
+      const a = new Date(l.date);
+      const b = new Date(key);
+      const startA = new Date(a);
+      startA.setDate(a.getDate() - a.getDay());
+      const startB = new Date(b);
+      startB.setDate(b.getDate() - b.getDay());
+      return startA.getTime() === startB.getTime() && l.completedHabitIds.includes(habitId);
+    }).length;
+  }
 
   return (
     <View style={styles.container}>
@@ -92,11 +107,18 @@ export default function TodayScreen() {
       )}
 
       <FlatList
-        data={dailyHabits}
+        data={[...dailyHabits, ...weeklyHabits]}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => {
+          const isDaily = item.schedule.type === "daily";
           const isDone = log?.completedHabitIds.includes(item.id) ?? false;
+          const weeklyCount = !isDaily && item.schedule.type === "weekly"
+            ? getWeeklyCountForHabit(item.id)
+            : 0;
+          const weeklyTarget = !isDaily && item.schedule.type === "weekly"
+            ? item.schedule.targetPerWeek
+            : 0;
           return (
             <Pressable
               onPress={() => toggle(item.id)}
@@ -105,9 +127,16 @@ export default function TodayScreen() {
               <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
                 {isDone ? <Text style={styles.check}>✓</Text> : null}
               </View>
-              <Text style={[styles.itemText, isDone && styles.itemTextDone]}>
-                {item.name}
-              </Text>
+              <View style={styles.habitLabelRow}>
+                <Text style={[styles.itemText, isDone && styles.itemTextDone]}>
+                  {item.name}
+                </Text>
+                {!isDaily && weeklyTarget > 0 ? (
+                  <Text style={styles.weeklyBadge}>
+                    {weeklyCount}/{weeklyTarget} this week
+                  </Text>
+                ) : null}
+              </View>
             </Pressable>
           );
         }}
@@ -213,6 +242,8 @@ const styles = StyleSheet.create({
   check: { fontSize: 16, fontWeight: "900" },
   itemText: { fontSize: 16, fontWeight: "600" },
   itemTextDone: { textDecorationLine: "line-through", opacity: 0.6 },
+  habitLabelRow: { flex: 1 },
+  weeklyBadge: { fontSize: 12, color: "#666", marginTop: 2 },
   addBtn: {
     paddingVertical: 10,
     marginBottom: 8,

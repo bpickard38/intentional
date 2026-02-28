@@ -11,8 +11,17 @@ export async function generateStudyPlan(
   if (!API_URL) throw new Error("EXPO_PUBLIC_API_URL is not set");
   const res = await fetch(`${API_URL}/api/generate-study-session`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ durationMin, topic, faithTradition }),
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
+    body: JSON.stringify({
+      durationMin,
+      topic,
+      faithTradition,
+      requestId: Date.now(),
+    }),
   });
   if (!res.ok) throw new Error("API request failed: " + res.status);
   const data = await res.json();
