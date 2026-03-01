@@ -65,12 +65,9 @@ export default function StudyScreen() {
 
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
-  const [chatInputHeight, setChatInputHeight] = useState(44);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [expandedBackground, setExpandedBackground] = useState<Record<number, boolean>>({});
   const [expandedCrossRef, setExpandedCrossRef] = useState<Record<string, boolean>>({});
-  const CHAT_INPUT_MAX_HEIGHT = 240;
-  const CHAT_INPUT_MIN_HEIGHT = 44;
 
   const timerPersistRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -264,8 +261,9 @@ export default function StudyScreen() {
       const assistantMsg: ChatMessage = { id: "msg-" + Date.now(), role: "assistant", text: answer, createdAt: new Date().toISOString() };
       setSession((prev) => (prev ? { ...prev, chat: [...(prev.chat ?? []), assistantMsg] } : null));
       await appendChatMessage(session.id, assistantMsg);
-    } catch {
-      const errMsg: ChatMessage = { id: "msg-err-" + Date.now(), role: "assistant", text: "I couldn't reach the server. Try again, or ask in fewer words.", createdAt: new Date().toISOString() };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const errMsg: ChatMessage = { id: "msg-err-" + Date.now(), role: "assistant", text: msg.includes("EXPO_PUBLIC_API_URL") ? "API URL not set. Add EXPO_PUBLIC_API_URL to .env and run: npx expo start -c" : msg.includes("timed out") ? "Request timed out. Check your connection and try again." : msg.includes("Network") || msg.includes("Failed") ? "Couldn't reach the server. Is EXPO_PUBLIC_API_URL correct in .env? For a device, use your computer's IP (not localhost)." : `Error: ${msg.length > 120 ? msg.slice(0, 120) + "…" : msg}`, createdAt: new Date().toISOString() };
       setSession((prev) => (prev ? { ...prev, chat: [...(prev.chat ?? []), errMsg] } : null));
       await appendChatMessage(session.id, errMsg);
     } finally {
@@ -315,17 +313,13 @@ export default function StudyScreen() {
           </ScrollView>
           <View style={styles.chatInputRow}>
             <TextInput
-              style={[styles.chatInput, { minHeight: CHAT_INPUT_MIN_HEIGHT, maxHeight: CHAT_INPUT_MAX_HEIGHT, height: chatInputHeight }]}
+              style={styles.chatInputMultiline}
               value={chatInput}
               onChangeText={setChatInput}
               placeholder="Ask a question…"
               editable={!chatSending}
               multiline
-              scrollEnabled={chatInputHeight >= CHAT_INPUT_MAX_HEIGHT}
-              onContentSizeChange={(e) => {
-                const h = e.nativeEvent.contentSize.height;
-                setChatInputHeight(Math.min(Math.max(CHAT_INPUT_MIN_HEIGHT, h + 16), CHAT_INPUT_MAX_HEIGHT));
-              }}
+              scrollEnabled
             />
             <Pressable onPress={handleSendChat} style={styles.sendBtn} disabled={chatSending || !chatInput.trim()}>
               <Text style={styles.sendBtnText}>{chatSending ? "…" : "Send"}</Text>
@@ -556,8 +550,9 @@ const styles = StyleSheet.create({
   chatBubbleUser: { alignSelf: "flex-end", backgroundColor: "#0a7ea4" },
   chatBubbleAssistant: { alignSelf: "flex-start", backgroundColor: "#eee" },
   chatBubbleText: { fontSize: 14 },
-  chatInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  chatInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   chatInput: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, fontSize: 15, textAlignVertical: "top" },
+  chatInputMultiline: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, fontSize: 15, minHeight: 56, maxHeight: 200, textAlignVertical: "top" },
   sendBtn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: "#0a7ea4", borderRadius: 10 },
   sendBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 
