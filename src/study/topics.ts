@@ -1,4 +1,4 @@
-import type { StudyPlanV2, StudyMode } from "@/src/core/types";
+import type { StudyPlanV2, StudyMode, StudyDisplayMode } from "@/src/core/types";
 
 export const TOPIC_SUGGESTIONS: string[] = [
   "Faith",
@@ -70,10 +70,17 @@ export function fallbackPlanV2(
   durationMin: 15 | 30 | 60,
   topic: string,
   mode: StudyMode,
-  faithTradition?: string
+  faithTradition?: string,
+  studyDisplayMode?: StudyDisplayMode
 ): StudyPlanV2 {
   const numScriptures = durationMin >= 60 ? 4 : durationMin >= 30 ? 3 : 2;
   const scriptures = pickRandom(SCRIPTURE_V2_POOL, numScriptures);
+  if (studyDisplayMode === "FULL_CHAPTER" && scriptures.length > 0) {
+    scriptures.forEach((s) => {
+      s.ref = (s.ref || "").replace(/\s*:\s*\d+(-\d+)?\s*$/i, "").trim() || s.ref || "";
+      s.keyVerses = undefined;
+    });
+  }
   if (mode === "devotional" && scriptures.length > 0) {
     scriptures.forEach((s) => {
       s.crossReferences = s.crossReferences.slice(0, 1);

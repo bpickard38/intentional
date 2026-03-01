@@ -23,10 +23,10 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
-import type { StudySession, StudyMode, ChatMessage, UserProfile, ScriptureSource, StudyDisplayMode } from "@/src/core/types";
+import type { StudySession, StudyMode, ChatMessage, UserProfile, ScriptureSource } from "@/src/core/types";
 import { canShowFullText } from "@/src/core/copyright";
 import { todayKey } from "@/src/core/dates";
-import { getJson, setJson } from "@/src/core/storage";
+import { getJson } from "@/src/core/storage";
 import { generateStudySession, studyChat, checkApiReachability } from "@/src/ai/apiClient";
 import { fallbackPlanV2, TOPIC_SUGGESTIONS } from "@/src/study/topics";
 import {
@@ -186,7 +186,7 @@ export default function StudyScreen() {
         plan = await generateStudySession(durationMin, t, mode, loadedProfile.faithTradition, loadedProfile.studyDisplayMode ?? "BOTH");
       } catch (err) {
         setApiError(err instanceof Error ? err.message : String(err));
-        plan = fallbackPlanV2(durationMin, t, mode, loadedProfile.faithTradition);
+        plan = fallbackPlanV2(durationMin, t, mode, loadedProfile.faithTradition, loadedProfile.studyDisplayMode ?? "BOTH");
       }
       const totalSec = durationMin * 60;
       const sess: StudySession = {
@@ -210,7 +210,7 @@ export default function StudyScreen() {
       setApiError("Something went wrong");
       const loadedProfile = await loadProfile();
       setProfile(loadedProfile);
-      const plan = fallbackPlanV2(durationMin, topic.trim() || "Faith", mode, loadedProfile.faithTradition);
+      const plan = fallbackPlanV2(durationMin, topic.trim() || "Faith", mode, loadedProfile.faithTradition, loadedProfile.studyDisplayMode ?? "BOTH");
       const sess: StudySession = {
         id: "session-" + Date.now(),
         date: todayKey(),
@@ -329,13 +329,6 @@ export default function StudyScreen() {
     setExpandedKeyVerses((prev) => ({ ...prev, [i]: !prev[i] }));
   };
 
-  const updateStudyDisplayMode = useCallback(async (m: StudyDisplayMode) => {
-    if (!profile) return;
-    const next = { ...profile, studyDisplayMode: m };
-    await setJson(PROFILE_KEY, next);
-    setProfile(next);
-  }, [profile]);
-
   if (isInSession && plan) {
     return (
       <View style={styles.container}>
@@ -350,34 +343,7 @@ export default function StudyScreen() {
         </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          {plan.studySummary ? (
-            <View style={styles.studySummary}>
-              <Text style={styles.studySummaryLabel}>Study summary</Text>
-              <Text style={styles.studySummaryText}>{plan.studySummary}</Text>
-            </View>
-          ) : plan.title ? (
-            <View style={styles.studySummary}>
-              <Text style={styles.studySummaryText}>{plan.title}</Text>
-            </View>
-          ) : null}
-
           <Text style={styles.sectionTitle}>Ask during study</Text>
-          <View style={styles.studyModeRow}>
-            <Text style={styles.studyModeLabel}>Study mode</Text>
-            <View style={styles.studyModeOptions}>
-              {(["KEY_VERSES", "FULL_CHAPTER", "BOTH"] as const).map((m) => (
-                <Pressable
-                  key={m}
-                  onPress={() => updateStudyDisplayMode(m)}
-                  style={[styles.studyModeChip, (profile?.studyDisplayMode ?? "BOTH") === m && styles.studyModeChipActive]}
-                >
-                  <Text style={[styles.studyModeChipText, (profile?.studyDisplayMode ?? "BOTH") === m && styles.studyModeChipTextActive]}>
-                    {m === "KEY_VERSES" ? "Key Verses" : m === "FULL_CHAPTER" ? "Full Chapter" : "Both"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
           <ScrollView style={styles.chatThread} nestedScrollEnabled>
             {(session?.chat ?? []).map((m) => (
               <View key={m.id} style={[styles.chatBubble, m.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}>
@@ -684,16 +650,6 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 40 },
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 8 },
-  studySummary: { marginBottom: 8, paddingVertical: 6 },
-  studySummaryLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginBottom: 4 },
-  studySummaryText: { fontSize: 15, color: "#666", fontStyle: "italic" },
-  studyModeRow: { marginBottom: 12 },
-  studyModeLabel: { fontSize: 12, fontWeight: "600", color: "#666", marginBottom: 6 },
-  studyModeOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  studyModeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: "#ddd" },
-  studyModeChipActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  studyModeChipText: { fontSize: 14 },
-  studyModeChipTextActive: { fontWeight: "600", color: "#0a7ea4" },
   themesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
   themeChip: { backgroundColor: "#eee", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   themeChipText: { fontSize: 12 },

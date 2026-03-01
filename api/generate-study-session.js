@@ -101,9 +101,9 @@ export default async function handler(req, res) {
   "planSteps": [{"minutes": number, "label": string, "instruction": string}],
   "scriptures": [{
     "source": "BIBLE" | "BOM" | "DNC" | "PGP",
-    "reference": string (e.g. "1 Nephi 3", "Alma 32", "Matthew 5:14-16"),
+    "reference": string (e.g. "1 Nephi 3", "Alma 32", "Matthew 5" for chapter; or "Matthew 5:14-16" only when studyDisplayMode is KEY_VERSES or BOTH),
     "title": string,
-    "keyVerses": string[] (verse refs when studyDisplayMode includes key verses, e.g. ["1 Nephi 3:7", "1 Nephi 3:15"]),
+    "keyVerses": string[] (ONLY when studyDisplayMode is KEY_VERSES or BOTH; when FULL_CHAPTER omit or leave empty),
     "why": string[] (1-3 bullets why this applies),
     "themes": string[] (e.g. ["obedience", "faith"]),
     "officialUrl": string (required: churchofjesuschrist.org for LDS, BibleGateway for Bible),
@@ -137,7 +137,7 @@ ${copyrightRule}
 - Never invent or guess URLs. For talks, officialUrl must be a real churchofjesuschrist.org/study/general-conference/... URL or leave empty.
 - User faithTradition: ${tradition}. ${scriptureSourceRule}
 ${talksRule}
-- studyDisplayMode: ${displayMode}. When KEY_VERSES include keyVerses array; when FULL_CHAPTER use chapter reference; when BOTH include both.
+- studyDisplayMode: ${displayMode}. STRICT: When FULL_CHAPTER — every scripture reference MUST be chapter-only (e.g. "1 Nephi 3", "Alma 32", "Matthew 5"). Do NOT include verse numbers in reference. Do NOT include keyVerses. When KEY_VERSES — use verse-level references and include keyVerses. When BOTH — include both chapter refs and keyVerses where helpful.
 - Mode: devotional=gentle; deep=more questions/cross-refs; challenge=conviction question + concrete actionStep.`;
 
     const user = `Create a ${durationMin}-minute ${mode} study session on topic: "${String(topic).trim()}". Return only the JSON object.`;
@@ -182,17 +182,22 @@ ${talksRule}
     }
 
     const scriptures = (Array.isArray(src.scriptures) ? src.scriptures : []).map((s) => {
-      const ref = String(s?.reference ?? s?.ref ?? "").trim() || String(s?.ref ?? "");
+      let ref = String(s?.reference ?? s?.ref ?? "").trim() || String(s?.ref ?? "");
+      if (displayMode === "FULL_CHAPTER" && ref) {
+        const chapterOnly = ref.replace(/\s*:\s*\d+(-\d+)?\s*$/i, "").trim();
+        if (chapterOnly) ref = chapterOnly;
+      }
       const source = ["BOM", "DNC", "PGP", "BIBLE"].includes(s?.source) ? s.source : (ref.match(/^(1|2)\s*Nephi|Alma|Mosiah|Helaman|Moroni|Jacob|Enos|Jarom|Omni|Words of Mormon|Doctrine|Pearl|Moses|Abraham|Joseph Smith—Matthew|Joseph Smith—History|Articles of Faith/i) ? "BOM" : "BIBLE");
       const isLdsSource = source === "BOM" || source === "DNC" || source === "PGP";
       const allowPassage = source === "BIBLE" && allowFullBibleText;
       const officialUrl = s?.officialUrl && String(s.officialUrl).startsWith("http") ? s.officialUrl : (source === "BIBLE" ? bibleGatewayUrl(ref) : churchScriptureUrl(ref, source));
       const cr = Array.isArray(s?.crossReferences) ? s.crossReferences : [];
+      const keyVerses = displayMode === "FULL_CHAPTER" ? undefined : (Array.isArray(s?.keyVerses) ? s.keyVerses.map((v) => String(v)) : undefined);
       return {
         ref,
         title: String(s?.title ?? ""),
         source,
-        keyVerses: Array.isArray(s?.keyVerses) ? s.keyVerses.map((v) => String(v)) : undefined,
+        keyVerses,
         why: Array.isArray(s?.why) ? s.why.map((w) => String(w)) : undefined,
         themes: Array.isArray(s?.themes) ? s.themes.map((t) => String(t)) : undefined,
         officialUrl,
