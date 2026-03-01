@@ -1,3 +1,14 @@
+/**
+ * Study screen - session view and setup.
+ *
+ * MANUAL VERIFICATION:
+ * 1. Ask input: Type a long multi-line question; cursor and text should stay visible (auto-grow up to ~240px, then scroll).
+ * 2. Scriptures: Full ref (e.g. "1 Nephi 3:7") and complete passage text displayed.
+ * 3. Cross-refs: Tap a cross-ref chip; it expands inline with passage. Tap again to collapse.
+ * 4. Background info: Tap "Background info" to expand/collapse.
+ * 5. Layout order: Ask during study → Scriptures → Talks (only if Settings > Faith tradition = LDS).
+ * 6. Non-LDS: No talks section. LDS: Talks from General Conference shown.
+ */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -54,6 +65,12 @@ export default function StudyScreen() {
 
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const [chatInputHeight, setChatInputHeight] = useState(44);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [expandedBackground, setExpandedBackground] = useState<Record<number, boolean>>({});
+  const [expandedCrossRef, setExpandedCrossRef] = useState<Record<string, boolean>>({});
+  const CHAT_INPUT_MAX_HEIGHT = 240;
+  const CHAT_INPUT_MIN_HEIGHT = 44;
 
   const timerPersistRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,6 +99,12 @@ export default function StudyScreen() {
   useEffect(() => {
     loadResumedSession();
   }, [loadResumedSession]);
+
+  useEffect(() => {
+    if (session?.status === "in_progress") {
+      loadProfile().then(setProfile);
+    }
+  }, [session?.status, loadProfile]);
 
   useEffect(() => {
     if (!session?.id || session.status !== "in_progress" || !session.timerState?.isRunning) return;
@@ -130,13 +153,14 @@ export default function StudyScreen() {
     setLoading(true);
     setApiError(null);
     try {
-      const profile = await loadProfile();
+      const loadedProfile = await loadProfile();
+      setProfile(loadedProfile);
       let plan;
       try {
-        plan = await generateStudySession(durationMin, t, mode, profile.faithTradition);
+        plan = await generateStudySession(durationMin, t, mode, loadedProfile.faithTradition);
       } catch (err) {
         setApiError(err instanceof Error ? err.message : String(err));
-        plan = fallbackPlanV2(durationMin, t, mode);
+        plan = fallbackPlanV2(durationMin, t, mode, loadedProfile.faithTradition);
       }
       const totalSec = durationMin * 60;
       const sess: StudySession = {
@@ -158,7 +182,9 @@ export default function StudyScreen() {
       setJournalAction("");
     } catch (_err) {
       setApiError("Something went wrong");
-      const plan = fallbackPlanV2(durationMin, topic.trim() || "Faith", mode);
+      const loadedProfile = await loadProfile();
+      setProfile(loadedProfile);
+      const plan = fallbackPlanV2(durationMin, topic.trim() || "Faith", mode, loadedProfile.faithTradition);
       const sess: StudySession = {
         id: "session-" + Date.now(),
         date: todayKey(),
@@ -187,17 +213,6 @@ export default function StudyScreen() {
     const next = { ...session.timerState, isRunning: !session.timerState.isRunning };
     setSession((prev) => (prev ? { ...prev, timerState: next } : null));
     await setSessionTimerState(session.id, next);
-  };
-
-  const handleNextStep = async () => {
-    if (!session?.timerState || !session.plan.planSteps.length) return;
-    const idx = Math.min(session.timerState.currentStepIndex + 1, session.plan.planSteps.length - 1);
-    const next = { ...session.timerState, currentStepIndex: idx };
-    setSession((prev) => (prev ? { ...prev, timerState: next } : null));
-    await setSessionTimerState(session.id, next);
-    try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch {}
   };
 
   const handleFinishSession = async () => {
@@ -261,78 +276,137 @@ export default function StudyScreen() {
   const isInSession = session?.status === "in_progress";
   const plan = session?.plan;
   const timerState = session?.timerState;
-  const currentStepIndex = timerState?.currentStepIndex ?? 0;
-  const currentStep = plan?.planSteps[currentStepIndex];
-  const stepRemainingSec = (() => {
-    if (!session?.timerState || !plan?.planSteps.length) return 0;
-    const totalSec = session.durationMin * 60;
-    const elapsed = totalSec - session.timerState.remainingSec;
-    let cum = 0;
-    for (let i = 0; i <= currentStepIndex && i < plan.planSteps.length; i++) {
-      const stepEnd = cum + plan.planSteps[i].minutes * 60;
-      if (elapsed < stepEnd) return stepEnd - elapsed;
-      cum = stepEnd;
-    }
-    return 0;
-  })();
+  const isLDS = profile?.faithTradition === "LDS";
+
+  const toggleBackground = (i: number) => {
+    setExpandedBackground((prev) => ({ ...prev, [i]: !prev[i] }));
+  };
+  const toggleCrossRef = (key: string) => {
+    setExpandedCrossRef((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   if (isInSession && plan) {
     return (
       <View style={styles.container}>
         <View style={styles.timerHeader}>
           <Text style={styles.timerText}>{formatTime(timerState?.remainingSec ?? 0)}</Text>
-          <Text style={styles.stepLabel}>{currentStep?.label ?? "—"} ({currentStep?.minutes ?? 0} min)</Text>
+          <Text style={styles.stepLabel}>{plan.title || plan.topic}</Text>
           <View style={styles.timerActions}>
             <Pressable onPress={handlePauseResume} style={styles.smallBtn}>
               <Text style={styles.smallBtnText}>{timerState?.isRunning ? "Pause" : "Resume"}</Text>
-            </Pressable>
-            <Pressable onPress={handleNextStep} style={styles.smallBtn} disabled={currentStepIndex >= (plan.planSteps?.length ?? 1) - 1}>
-              <Text style={styles.smallBtnText}>Next step</Text>
             </Pressable>
           </View>
         </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          <Text style={styles.sectionTitle}>Plan</Text>
-          {(plan.planSteps ?? []).map((step, i) => (
-            <View key={i} style={[styles.stepRow, i === currentStepIndex && styles.stepRowActive]}>
-              <Text style={styles.stepBullet}>{i === currentStepIndex ? "●" : "○"} {step.label}</Text>
-              <Text style={styles.stepInstruction}>{step.instruction}</Text>
+          {plan.title && (
+            <View style={styles.studySummary}>
+              <Text style={styles.studySummaryText}>{plan.title}</Text>
             </View>
-          ))}
+          )}
+
+          <Text style={styles.sectionTitle}>Ask during study</Text>
+          <ScrollView style={styles.chatThread} nestedScrollEnabled>
+            {(session?.chat ?? []).map((m) => (
+              <View key={m.id} style={[styles.chatBubble, m.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}>
+                <Text style={styles.chatBubbleText}>{m.text}</Text>
+              </View>
+            ))}
+          </ScrollView>
+          <View style={styles.chatInputRow}>
+            <TextInput
+              style={[styles.chatInput, { minHeight: CHAT_INPUT_MIN_HEIGHT, maxHeight: CHAT_INPUT_MAX_HEIGHT, height: chatInputHeight }]}
+              value={chatInput}
+              onChangeText={setChatInput}
+              placeholder="Ask a question…"
+              editable={!chatSending}
+              multiline
+              scrollEnabled={chatInputHeight >= CHAT_INPUT_MAX_HEIGHT}
+              onContentSizeChange={(e) => {
+                const h = e.nativeEvent.contentSize.height;
+                setChatInputHeight(Math.min(Math.max(CHAT_INPUT_MIN_HEIGHT, h + 16), CHAT_INPUT_MAX_HEIGHT));
+              }}
+            />
+            <Pressable onPress={handleSendChat} style={styles.sendBtn} disabled={chatSending || !chatInput.trim()}>
+              <Text style={styles.sendBtnText}>{chatSending ? "…" : "Send"}</Text>
+            </Pressable>
+          </View>
 
           <Text style={styles.sectionTitle}>Scriptures</Text>
           {(plan.scriptures ?? []).map((sc, i) => (
             <View key={i} style={styles.card}>
-              <Text style={styles.cardTitle}>{sc.title} — {sc.ref}</Text>
-              {sc.background ? <Text style={styles.cardSummary}>{sc.background}</Text> : null}
+              <Text style={styles.cardTitle}>{sc.title}</Text>
+              <Text style={styles.scriptureRef}>{sc.ref}</Text>
+              {sc.passage ? <Text style={styles.scripturePassage}>{sc.passage}</Text> : null}
+              {sc.background ? (
+                <View style={styles.backgroundSection}>
+                  <Pressable
+                    onPress={() => toggleBackground(i)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: !!expandedBackground[i] }}
+                    accessibilityLabel="Background info"
+                  >
+                    <Text style={styles.backgroundToggle}>
+                      {expandedBackground[i] ? "▼" : "▶"} Background info
+                    </Text>
+                  </Pressable>
+                  {expandedBackground[i] && <Text style={styles.cardSummary}>{sc.background}</Text>}
+                </View>
+              ) : null}
               {(sc.observationQuestions ?? []).length > 0 && <Text style={styles.cardLabel}>Observe</Text>}
               {(sc.observationQuestions ?? []).map((q, j) => <Text key={j} style={styles.bullet}>• {q}</Text>)}
               {(sc.interpretation ?? []).length > 0 && <Text style={styles.cardLabel}>Interpret</Text>}
               {(sc.interpretation ?? []).map((x, j) => <Text key={j} style={styles.bullet}>• {x}</Text>)}
               {(sc.crossReferences ?? []).length > 0 && <Text style={styles.cardLabel}>Cross-refs</Text>}
-              {(sc.crossReferences ?? []).map((cr, j) => (
-                <Pressable key={j} onPress={() => cr.url && Linking.openURL(cr.url)}>
-                  <Text style={styles.linkText}>{cr.ref}: {cr.why}</Text>
-                </Pressable>
-              ))}
+              {(sc.crossReferences ?? []).map((cr, j) => {
+                const crKey = `sc${i}-cr${j}`;
+                const isExpanded = !!expandedCrossRef[crKey];
+                return (
+                  <View key={j} style={styles.crossRefItem}>
+                    <Pressable
+                      onPress={() => toggleCrossRef(crKey)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: isExpanded }}
+                      accessibilityLabel={`Cross reference ${cr.ref}`}
+                    >
+                      <Text style={styles.crossRefChip}>{cr.ref} — {cr.why}</Text>
+                    </Pressable>
+                    {isExpanded && (
+                      <View style={styles.crossRefExpand}>
+                        <Text style={styles.scriptureRef}>{cr.ref}</Text>
+                        {cr.passage ? (
+                          <Text style={styles.scripturePassage}>{cr.passage}</Text>
+                        ) : (
+                          <Pressable onPress={() => cr.url && Linking.openURL(cr.url)}>
+                            <Text style={styles.linkText}>Open in browser</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
               <Pressable onPress={() => sc.url && Linking.openURL(sc.url)} style={styles.linkBtn}>
                 <Text style={styles.linkBtnText}>Open</Text>
               </Pressable>
             </View>
           ))}
 
-          <Text style={styles.sectionTitle}>Talks</Text>
-          {(plan.talks ?? []).map((t, i) => (
-            <View key={i} style={styles.card}>
-              <Text style={styles.cardTitle}>{t.title}</Text>
-              {t.speaker ? <Text style={styles.cardMeta}>{t.speaker}</Text> : null}
-              <Text style={styles.cardSummary}>{t.summary}</Text>
-              <Pressable onPress={() => t.url && Linking.openURL(t.url)} style={styles.linkBtn}>
-                <Text style={styles.linkBtnText}>Open</Text>
-              </Pressable>
-            </View>
-          ))}
+          {isLDS && (plan.talks ?? []).length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>Talks from General Conference</Text>
+              {(plan.talks ?? []).map((t, i) => (
+                <View key={i} style={styles.card}>
+                  <Text style={styles.cardTitle}>{t.title}</Text>
+                  {t.speaker ? <Text style={styles.cardMeta}>{t.speaker}</Text> : null}
+                  <Text style={styles.cardSummary}>{t.summary}</Text>
+                  <Pressable onPress={() => t.url && Linking.openURL(t.url)} style={styles.linkBtn}>
+                    <Text style={styles.linkBtnText}>Open</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </>
+          )}
 
           {plan.articles && plan.articles.length > 0 && (
             <>
@@ -351,8 +425,6 @@ export default function StudyScreen() {
 
           <Text style={styles.sectionTitle}>Reflection</Text>
           {(plan.reflectionPrompts ?? []).map((p, i) => <Text key={i} style={styles.bullet}>• {p}</Text>)}
-          <Text style={styles.sectionTitle}>Action step</Text>
-          <Text style={styles.actionStep}>{plan.actionStep}</Text>
 
           <Text style={styles.sectionTitle}>Journal</Text>
           <Text style={styles.journalLabel}>What I learned</Text>
@@ -364,27 +436,6 @@ export default function StudyScreen() {
           <Pressable onPress={handleSaveJournal} style={styles.saveJournalBtn} disabled={savingJournal}>
             <Text style={styles.saveJournalBtnText}>{savingJournal ? "Saving…" : "Save journal"}</Text>
           </Pressable>
-
-          <Text style={styles.sectionTitle}>Ask during study</Text>
-          <ScrollView style={styles.chatThread} nestedScrollEnabled>
-            {(session?.chat ?? []).map((m) => (
-              <View key={m.id} style={[styles.chatBubble, m.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}>
-                <Text style={styles.chatBubbleText}>{m.text}</Text>
-              </View>
-            ))}
-          </ScrollView>
-          <View style={styles.chatInputRow}>
-            <TextInput
-              style={styles.chatInput}
-              value={chatInput}
-              onChangeText={setChatInput}
-              placeholder="Ask a question…"
-              editable={!chatSending}
-            />
-            <Pressable onPress={handleSendChat} style={styles.sendBtn} disabled={chatSending || !chatInput.trim()}>
-              <Text style={styles.sendBtnText}>{chatSending ? "…" : "Send"}</Text>
-            </Pressable>
-          </View>
 
           <Pressable onPress={handleFinishSession} style={styles.finishBtn}>
             <Text style={styles.finishBtnText}>Finish session</Text>
@@ -477,11 +528,16 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 40 },
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 8 },
-  stepRow: { padding: 10, borderRadius: 8, marginBottom: 6, borderWidth: 1, borderColor: "#eee" },
-  stepRowActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  stepBullet: { fontSize: 16, fontWeight: "600" },
-  stepInstruction: { fontSize: 14, color: "#444", marginTop: 4 },
+  studySummary: { marginBottom: 8, paddingVertical: 6 },
+  studySummaryText: { fontSize: 15, color: "#666", fontStyle: "italic" },
   card: { borderWidth: 1, borderColor: "#eee", borderRadius: 12, padding: 14, marginBottom: 10 },
+  scriptureRef: { fontSize: 15, fontWeight: "600", color: "#0a7ea4", marginBottom: 6 },
+  scripturePassage: { fontSize: 15, color: "#333", lineHeight: 22, marginBottom: 8 },
+  backgroundSection: { marginTop: 4, marginBottom: 4 },
+  backgroundToggle: { fontSize: 14, fontWeight: "600", color: "#666", marginBottom: 4 },
+  crossRefItem: { marginBottom: 8 },
+  crossRefChip: { fontSize: 14, color: "#0a7ea4", fontWeight: "600", paddingVertical: 4 },
+  crossRefExpand: { marginLeft: 12, marginTop: 4, padding: 10, backgroundColor: "#f8f9fa", borderRadius: 8 },
   cardTitle: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
   cardMeta: { fontSize: 14, color: "#666", marginBottom: 4 },
   cardSummary: { fontSize: 14, color: "#444", marginBottom: 8 },
@@ -490,7 +546,6 @@ const styles = StyleSheet.create({
   linkText: { fontSize: 14, color: "#0a7ea4", marginBottom: 4 },
   linkBtn: { alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#eee", borderRadius: 8, marginTop: 6 },
   linkBtnText: { fontSize: 14, fontWeight: "600" },
-  actionStep: { fontSize: 15, fontStyle: "italic", color: "#333" },
   journalLabel: { fontSize: 14, fontWeight: "600", marginTop: 8, marginBottom: 4 },
   journalInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 12, fontSize: 15, minHeight: 56, textAlignVertical: "top" },
   saveJournalBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 12, alignItems: "center", backgroundColor: "#0a7ea4" },
@@ -502,7 +557,7 @@ const styles = StyleSheet.create({
   chatBubbleAssistant: { alignSelf: "flex-start", backgroundColor: "#eee" },
   chatBubbleText: { fontSize: 14 },
   chatInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  chatInput: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, fontSize: 15 },
+  chatInput: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, fontSize: 15, textAlignVertical: "top" },
   sendBtn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: "#0a7ea4", borderRadius: 10 },
   sendBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 

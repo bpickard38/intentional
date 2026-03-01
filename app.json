@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "morning-tracker",
-    "slug": "morning-tracker",
+    "name": "Intentional",
+    "slug": "intentional",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "morningtracker",
+    "scheme": "intentional",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

@@ -77,12 +77,18 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
     return {
       ref: ensureString(s.ref, ""),
       title: ensureString(s.title, "Scripture"),
+      passage: ensureString(s.passage, ""),
       background: ensureString(s.background, ensureString(s.summary, "")),
       observationQuestions: ensureArray(s.observationQuestions, []).map((q) => ensureString(q, "")),
       interpretation: ensureArray(s.interpretation, []).map((i) => ensureString(i, "")),
       crossReferences: ensureArray(s.crossReferences, []).map((x: unknown) => {
         const cr = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
-        return { ref: ensureString(cr.ref, ""), why: ensureString(cr.why, ""), url: ensureString(cr.url, "") };
+        return {
+          ref: ensureString(cr.ref, ""),
+          why: ensureString(cr.why, ""),
+          url: ensureString(cr.url, ""),
+          passage: cr.passage != null ? ensureString(cr.passage, "") : undefined,
+        };
       }),
       summary: ensureString(s.summary, ""),
       url: ensureString(s.url, ""),
@@ -115,8 +121,8 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
     topic,
     mode,
     planSteps: defaultSteps,
-    scriptures: scriptures.length ? scriptures : [{ ref: "", title: "Scripture", background: "", observationQuestions: [], interpretation: [], crossReferences: [], summary: "No scriptures returned.", url: "" }],
-    talks: talks.length ? talks : [{ title: "General Conference", summary: "Search for a talk on your topic.", url: "https://www.churchofjesuschrist.org/general-conference?lang=eng" }],
+    scriptures: scriptures.length ? scriptures : [{ ref: "", title: "Scripture", passage: "", background: "", observationQuestions: [], interpretation: [], crossReferences: [], summary: "No scriptures returned.", url: "" }],
+    talks,
     articles,
     reflectionPrompts: reflectionPrompts.length ? reflectionPrompts : ["What stood out?", "How will you apply this?"],
     actionStep,

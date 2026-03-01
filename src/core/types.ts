@@ -38,10 +38,11 @@ export type StudyPlanV2 = {
   scriptures: {
     ref: string;
     title: string;
+    passage: string;
     background: string;
     observationQuestions: string[];
     interpretation: string[];
-    crossReferences: { ref: string; why: string; url: string }[];
+    crossReferences: { ref: string; why: string; url: string; passage?: string }[];
     summary: string;
     url: string;
   }[];
