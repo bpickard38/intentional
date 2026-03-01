@@ -72,4 +72,12 @@ Join our community of developers creating universal apps.
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(204).end();
   ```
-- **Device/emulator:** If you use a local backend (e.g. `http://localhost:3000`), on Android emulator use `http://10.0.2.2:3000`; on a physical device use your computer’s LAN IP (e.g. `http://192.168.1.x:3000`).
+- **Device/emulator:** If you use a local backend (e.g. `http://localhost:3000`), on Android emulator use `http://10.0.2.2:3000`; on a physical device use your computer's LAN IP (e.g. `http://192.168.1.x:3000`).
+
+## Study Session + Chat
+
+- **Study modes:** Devotional, Deep Study, and Challenge. Each mode changes the plan structure and reflection prompts.
+- **Guided session:** After choosing duration, mode, and topic and tapping "Start session", you get a time-boxed plan with steps, scriptures (with background, observation questions, interpretation, cross-references), talks/articles, reflection prompts, and an action step. A countdown timer runs on-device; you can Pause/Resume and advance steps manually.
+- **Ask during study:** The in-session chat sends your question to the backend `/api/study-chat` with the current plan, mode, topic, and last messages. Responses are short and mentor-style. If the API fails, a friendly error bubble is shown.
+- **Persistence:** Sessions, habit logs, and chat transcripts are stored locally with AsyncStorage. History lists all sessions (newest first) with mode and status; tap to see full detail and chat transcript. "Resume" appears for in-progress sessions and opens the Study tab with that session.
+- **Env and restart:** Set `EXPO_PUBLIC_API_URL` in `.env` (no trailing slash). After changing `.env`, clear cache and restart: `npx expo start -c`. computer’s LAN IP (e.g. `http://192.168.1.x:3000`).
