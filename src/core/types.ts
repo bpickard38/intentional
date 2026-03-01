@@ -30,6 +30,9 @@ export type StudyPlan = {
 /** User preference: Key Verses only, Full Chapter only, or Both. */
 export type StudyDisplayMode = "KEY_VERSES" | "FULL_CHAPTER" | "BOTH";
 
+/** Study depth - user-facing toggle for how rich the result is. */
+export type StudyDepth = "QUICK" | "GUIDED" | "DEEP_DIVE";
+
 /** Scripture source for copyright: do not show full text for BOM, DNC, PGP. */
 export type ScriptureSource = "BOM" | "DNC" | "PGP" | "BIBLE";
 
@@ -39,8 +42,66 @@ export type StudyPlanV2 = {
   title: string;
   durationMin: 15 | 30 | 60;
   topic: string;
+  /** Legacy internal study mode (devotional/deep/challenge). */
   mode: StudyMode;
+
+  /** NORTH STAR: Big Idea hero at the top of the result. */
+  bigIdeaHeadline?: string;
+  bigIdeaSupport?: string;
+
+  /** Study depth for this plan (Quick / Guided / Deep Dive). */
+  studyDepth?: StudyDepth;
+
+  /** Timer-friendly micro steps (kept for the header timer experience). */
   planSteps: { minutes: number; label: string; instruction: string }[];
+
+  /**
+   * Micro study plan rows:
+   * - read: 1–2 chapter references + official URLs
+   * - lookFor: one line focus lens
+   * - ponder: one reflection question
+   */
+  studyPlan?: {
+    read: { source: ScriptureSource; reference: string; url: string }[];
+    lookFor: string;
+    ponder: string;
+  };
+
+  /**
+   * Main reading cards for the session (1–3).
+   * Chapter-based references with key moments and optional key verses + cross refs.
+   */
+  readingCards?: {
+    source: ScriptureSource;
+    reference: string;
+    url: string;
+    whyOneLine: string;
+    keyMoments: string[];
+    keyVerses?: string[];
+    crossRefs?: { label: string; url: string }[];
+  }[];
+
+  /**
+   * Optional deep dive accordion content.
+   * - background bullets
+   * - cross refs as chips
+   * - related talk (LDS only)
+   */
+  deepDive?: {
+    backgroundBullets?: string[];
+    crossRefs?: { label: string; url: string }[];
+    talk?: {
+      title: string;
+      speaker: string;
+      whyOneLine: string;
+      officialUrl: string;
+    };
+  };
+
+  /**
+   * Legacy scripture/talk/article fields kept for compatibility (history, old sessions).
+   * New UI primarily uses bigIdeaHeadline/studyPlan/readingCards/deepDive.
+   */
   scriptures: {
     ref: string;
     title: string;
@@ -73,9 +134,11 @@ export type StudyPlanV2 = {
     conference?: string;
   }[];
   articles: { title: string; summary: string; url: string }[];
+  /** Prompts shown in the Reflection section; keep this short (1–2) for new UI. */
   reflectionPrompts: string[];
+  /** Kept for compatibility; new UI does not expose explicit "next step". */
   actionStep: string;
-  /** 2–4 sentence recap; no "next step" planning UI. */
+  /** Optional recap; new UI focuses on Big Idea hero + micro plan instead. */
   studySummary?: string;
   optional?: { memoryVerse?: string; prayerPrompt?: string };
 };
@@ -123,5 +186,7 @@ export type UserProfile = {
   faithTradition: FaithTradition;
   /** Key Verses | Full Chapter | Both. Default BOTH. */
   studyDisplayMode?: StudyDisplayMode;
+   /** Quick | Guided | Deep Dive. Default GUIDED. */
+   studyDepth?: StudyDepth;
   createdAt: string;
 };

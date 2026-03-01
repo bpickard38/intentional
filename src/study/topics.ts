@@ -1,4 +1,4 @@
-import type { StudyPlanV2, StudyMode, StudyDisplayMode } from "@/src/core/types";
+import type { StudyPlanV2, StudyMode, StudyDisplayMode, StudyDepth } from "@/src/core/types";
 
 export const TOPIC_SUGGESTIONS: string[] = [
   "Faith",
@@ -71,7 +71,8 @@ export function fallbackPlanV2(
   topic: string,
   mode: StudyMode,
   faithTradition?: string,
-  studyDisplayMode?: StudyDisplayMode
+  studyDisplayMode?: StudyDisplayMode,
+  studyDepth?: StudyDepth
 ): StudyPlanV2 {
   const numScriptures = durationMin >= 60 ? 4 : durationMin >= 30 ? 3 : 2;
   const scriptures = pickRandom(SCRIPTURE_V2_POOL, numScriptures);

@@ -23,7 +23,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
-import type { StudySession, StudyMode, ChatMessage, UserProfile, ScriptureSource } from "@/src/core/types";
+import type { StudySession, StudyMode, ChatMessage, UserProfile, ScriptureSource, StudyDepth } from "@/src/core/types";
 import { canShowFullText } from "@/src/core/copyright";
 import { todayKey } from "@/src/core/dates";
 import { getJson } from "@/src/core/storage";
@@ -40,7 +40,13 @@ import {
 } from "@/src/study/sessionService";
 
 const PROFILE_KEY = "profile:v1";
-const DEFAULT_PROFILE: UserProfile = { id: "default", faithTradition: "Christian", studyDisplayMode: "BOTH", createdAt: new Date().toISOString() };
+const DEFAULT_PROFILE: UserProfile = {
+  id: "default",
+  faithTradition: "Christian",
+  studyDisplayMode: "BOTH",
+  studyDepth: "GUIDED",
+  createdAt: new Date().toISOString(),
+};
 const TIMER_PERSIST_INTERVAL_MS = 10000;
 
 /** Copyright helper is in @/src/core/copyright (canShowFullText). */
@@ -51,6 +57,22 @@ function formatTime(sec: number): string {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
+const DEPTH_OPTIONS: { value: StudyDepth; label: string; mode: StudyMode }[] = [
+  { value: "QUICK", label: "Quick", mode: "devotional" },
+  { value: "GUIDED", label: "Guided", mode: "deep" },
+  { value: "DEEP_DIVE", label: "Deep Dive", mode: "challenge" },
+];
+
+function modeFromDepth(depth: StudyDepth): StudyMode {
+  const found = DEPTH_OPTIONS.find((o) => o.value === depth);
+  return found ? found.mode : "deep";
+}
+
+function depthFromMode(mode: StudyMode): StudyDepth {
+  const found = DEPTH_OPTIONS.find((o) => o.mode === mode);
+  return found ? found.value : "GUIDED";
+}
+
 export default function StudyScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
   const [session, setSession] = useState<StudySession | null>(null);
@@ -59,6 +81,7 @@ export default function StudyScreen() {
 
   const [durationMin, setDurationMin] = useState<15 | 30 | 60>(30);
   const [mode, setMode] = useState<StudyMode>("devotional");
+  const [studyDepth, setStudyDepth] = useState<StudyDepth>("GUIDED");
   const [topic, setTopic] = useState("");
 
   const [journalLearned, setJournalLearned] = useState("");
@@ -69,9 +92,9 @@ export default function StudyScreen() {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [expandedBackground, setExpandedBackground] = useState<Record<number, boolean>>({});
-  const [expandedCrossRef, setExpandedCrossRef] = useState<Record<string, boolean>>({});
-  const [expandedKeyVerses, setExpandedKeyVerses] = useState<Record<number, boolean>>({});
+  const [expandedReadingCards, setExpandedReadingCards] = useState<Record<number, boolean>>({});
+  const [deepDiveOpen, setDeepDiveOpen] = useState(false);
+  const [reflectionOpen, setReflectionOpen] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; url: string; error?: string } | null>(null);
   const [apiCheckLoading, setApiCheckLoading] = useState(false);
 
@@ -85,6 +108,17 @@ export default function StudyScreen() {
     return p ?? DEFAULT_PROFILE;
   }, []);
 
+  // Seed defaults from profile when not already in a running session.
+  useEffect(() => {
+    if (session) return;
+    loadProfile().then((p) => {
+      const depth = p.studyDepth ?? "GUIDED";
+      setProfile({ ...p, studyDepth: depth });
+      setStudyDepth(depth);
+      setMode(modeFromDepth(depth));
+    });
+  }, [loadProfile, session]);
+
   const loadResumedSession = useCallback(async () => {
     if (!sessionId) return;
     const s = await getSessionById(sessionId);
@@ -92,6 +126,7 @@ export default function StudyScreen() {
       setSession(s);
       setDurationMin(s.durationMin);
       setMode(s.plan.mode);
+      setStudyDepth(s.plan.studyDepth ?? depthFromMode(s.plan.mode));
       setTopic(s.plan.topic);
       setJournalLearned(s.journal?.learned ?? "");
       setJournalFelt(s.journal?.felt ?? "");
@@ -183,10 +218,24 @@ export default function StudyScreen() {
       setProfile(loadedProfile);
       let plan;
       try {
-        plan = await generateStudySession(durationMin, t, mode, loadedProfile.faithTradition, loadedProfile.studyDisplayMode ?? "BOTH");
+        plan = await generateStudySession(
+          durationMin,
+          t,
+          mode,
+          loadedProfile.faithTradition,
+          loadedProfile.studyDisplayMode ?? "BOTH",
+          studyDepth
+        );
       } catch (err) {
         setApiError(err instanceof Error ? err.message : String(err));
-        plan = fallbackPlanV2(durationMin, t, mode, loadedProfile.faithTradition, loadedProfile.studyDisplayMode ?? "BOTH");
+        plan = fallbackPlanV2(
+          durationMin,
+          t,
+          mode,
+          loadedProfile.faithTradition,
+          loadedProfile.studyDisplayMode ?? "BOTH",
+          studyDepth
+        );
       }
       const totalSec = durationMin * 60;
       const sess: StudySession = {
@@ -210,7 +259,14 @@ export default function StudyScreen() {
       setApiError("Something went wrong");
       const loadedProfile = await loadProfile();
       setProfile(loadedProfile);
-      const plan = fallbackPlanV2(durationMin, topic.trim() || "Faith", mode, loadedProfile.faithTradition, loadedProfile.studyDisplayMode ?? "BOTH");
+      const plan = fallbackPlanV2(
+        durationMin,
+        topic.trim() || "Faith",
+        mode,
+        loadedProfile.faithTradition,
+        loadedProfile.studyDisplayMode ?? "BOTH",
+        studyDepth
+      );
       const sess: StudySession = {
         id: "session-" + Date.now(),
         date: todayKey(),
@@ -318,16 +374,15 @@ export default function StudyScreen() {
   const plan = session?.plan;
   const timerState = session?.timerState;
   const isLDS = profile?.faithTradition === "LDS";
+  const effectiveDepth: StudyDepth =
+    (plan?.studyDepth as StudyDepth) ?? studyDepth ?? "GUIDED";
+  const maxReadingCards = effectiveDepth === "QUICK" ? 1 : 3;
+  const maxKeyMoments = effectiveDepth === "QUICK" ? 3 : 6;
+  const showDeepDive = effectiveDepth !== "QUICK";
 
-  const toggleBackground = (i: number) => {
-    setExpandedBackground((prev) => ({ ...prev, [i]: !prev[i] }));
-  };
-  const toggleCrossRef = (key: string) => {
-    setExpandedCrossRef((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-  const toggleKeyVerses = (i: number) => {
-    setExpandedKeyVerses((prev) => ({ ...prev, [i]: !prev[i] }));
-  };
+  useEffect(() => {
+    setDeepDiveOpen(effectiveDepth === "DEEP_DIVE");
+  }, [effectiveDepth]);
 
   if (isInSession && plan) {
     return (
@@ -343,6 +398,45 @@ export default function StudyScreen() {
         </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* SECTION 1 — BIG IDEA */}
+          {(plan.bigIdeaHeadline || plan.title || plan.topic) && (
+            <View style={styles.heroCard}>
+              <Text style={styles.heroHeadline}>{plan.bigIdeaHeadline || plan.title || plan.topic}</Text>
+              {plan.bigIdeaSupport ? <Text style={styles.heroSupport}>{plan.bigIdeaSupport}</Text> : null}
+            </View>
+          )}
+
+          {/* SECTION 2 — MICRO STUDY PLAN */}
+          <View style={styles.microPlanCard}>
+            <View style={styles.microPlanRow}>
+              <Text style={styles.microPlanLabel}>Read</Text>
+              <View style={styles.microPlanValue}>
+                {(plan.studyPlan?.read ?? []).slice(0, 2).map((r, idx) => (
+                  <Pressable
+                    key={`${r.reference}-${idx}`}
+                    onPress={() => r.url && Linking.openURL(r.url)}
+                    style={styles.microPlanLink}
+                  >
+                    <Text style={styles.microPlanLinkText}>{r.reference}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+            <View style={styles.microPlanRow}>
+              <Text style={styles.microPlanLabel}>Look for</Text>
+              <Text style={styles.microPlanText}>
+                {plan.studyPlan?.lookFor || "Notice what God highlights for you."}
+              </Text>
+            </View>
+            <View style={styles.microPlanRow}>
+              <Text style={styles.microPlanLabel}>Ponder</Text>
+              <Text style={styles.microPlanText}>
+                {plan.studyPlan?.ponder || "What do you feel invited to do in response?"}
+              </Text>
+            </View>
+          </View>
+
+          {/* In-session Q&A helper */}
           <Text style={styles.sectionTitle}>Ask during study</Text>
           <ScrollView style={styles.chatThread} nestedScrollEnabled>
             {(session?.chat ?? []).map((m) => (
@@ -366,162 +460,169 @@ export default function StudyScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.sectionTitle}>Scriptures</Text>
-          {(plan.scriptures ?? []).map((sc, i) => {
-            const isNewCard = sc.source != null || (sc.why != null && sc.why.length > 0);
-            const showPassage = canShowFullText(sc.source) && sc.passage;
-            const readUrl = sc.officialUrl || sc.url;
-
-            if (isNewCard) {
-              return (
-                <View key={i} style={styles.card}>
-                  <Text style={styles.cardTitle}>{sc.title}</Text>
-                  <Text style={styles.scriptureRef}>{sc.ref}</Text>
-                  {sc.keyVerses && sc.keyVerses.length > 0 && (
-                    <Text style={styles.cardMeta}>Key verses: {sc.keyVerses.join(", ")}</Text>
-                  )}
-                  {showPassage ? <Text style={styles.scripturePassage}>{sc.passage}</Text> : null}
-                  {sc.why && sc.why.length > 0 && (
-                    <>
-                      <Text style={styles.cardLabel}>Why this applies</Text>
-                      {sc.why.map((w, j) => <Text key={j} style={styles.bullet}>• {w}</Text>)}
-                    </>
-                  )}
-                  {sc.themes && sc.themes.length > 0 && (
-                    <View style={styles.themesRow}>
-                      {sc.themes.map((th, j) => (
-                        <View key={j} style={styles.themeChip}><Text style={styles.themeChipText}>{th}</Text></View>
-                      ))}
-                    </View>
-                  )}
-                  {(sc.keyVersesSummary ?? sc.background) && (
-                    <View style={styles.backgroundSection}>
-                      {sc.keyVersesSummary ? (
-                        <>
-                          <Pressable onPress={() => toggleKeyVerses(i)} accessibilityRole="button" accessibilityState={{ expanded: !!expandedKeyVerses[i] }}>
-                            <Text style={styles.backgroundToggle}>{expandedKeyVerses[i] ? "▼" : "▶"} Key verses summary</Text>
-                          </Pressable>
-                          {expandedKeyVerses[i] && <Text style={styles.cardSummary}>{sc.keyVersesSummary}</Text>}
-                        </>
-                      ) : null}
-                      {sc.background ? (
-                        <>
-                          <Pressable onPress={() => toggleBackground(i)} accessibilityRole="button" accessibilityState={{ expanded: !!expandedBackground[i] }}>
-                            <Text style={styles.backgroundToggle}>{expandedBackground[i] ? "▼" : "▶"} Background info</Text>
-                          </Pressable>
-                          {expandedBackground[i] && <Text style={styles.cardSummary}>{sc.background}</Text>}
-                        </>
-                      ) : null}
-                    </View>
-                  )}
-                  <Pressable onPress={() => readUrl && Linking.openURL(readUrl)} style={styles.linkBtn}>
-                    <Text style={styles.linkBtnText}>Read in Gospel Library / Official site</Text>
-                  </Pressable>
-                </View>
-              );
-            }
-
+          {/* SECTION 3 — RECOMMENDED READING CARDS */}
+          <Text style={styles.sectionTitle}>Recommended reading</Text>
+          {(plan.readingCards ?? []).slice(0, maxReadingCards).map((card, index) => {
+            const isExpanded = !!expandedReadingCards[index];
+            const keyMoments = (card.keyMoments ?? []).slice(0, maxKeyMoments);
+            const keyVerses = card.keyVerses ?? [];
+            const crossRefs = card.crossRefs ?? [];
             return (
-            <View key={i} style={styles.card}>
-              <Text style={styles.cardTitle}>{sc.title}</Text>
-              <Text style={styles.scriptureRef}>{sc.ref}</Text>
-              {showPassage && sc.passage ? <Text style={styles.scripturePassage}>{sc.passage}</Text> : (sc.keyVersesSummary ? <Text style={styles.cardSummary}>{sc.keyVersesSummary}</Text> : null)}
-              {sc.background ? (
-                <View style={styles.backgroundSection}>
-                  <Pressable onPress={() => toggleBackground(i)} accessibilityRole="button" accessibilityState={{ expanded: !!expandedBackground[i] }}>
-                    <Text style={styles.backgroundToggle}>{expandedBackground[i] ? "▼" : "▶"} Background info</Text>
+              <View key={`${card.reference}-${index}`} style={styles.card}>
+                <Text style={styles.cardTitle}>{card.reference}</Text>
+                <Text style={styles.cardSummary}>{card.whyOneLine}</Text>
+                <View style={styles.readingActionsRow}>
+                  <Pressable
+                    onPress={() => card.url && Linking.openURL(card.url)}
+                    style={styles.linkBtn}
+                    disabled={!card.url}
+                  >
+                    <Text style={styles.linkBtnText}>{card.url ? "Open chapter" : "Link unavailable"}</Text>
                   </Pressable>
-                  {expandedBackground[i] && <Text style={styles.cardSummary}>{sc.background}</Text>}
+                  <Pressable
+                    onPress={() =>
+                      setExpandedReadingCards((prev) => ({ ...prev, [index]: !prev[index] }))
+                    }
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: isExpanded }}
+                    style={styles.toggleBtn}
+                  >
+                    <Text style={styles.toggleBtnText}>
+                      {isExpanded ? "Hide key moments" : "Show key moments"}
+                    </Text>
+                  </Pressable>
                 </View>
-              ) : null}
-              {(sc.observationQuestions ?? []).length > 0 && <Text style={styles.cardLabel}>Observe</Text>}
-              {(sc.observationQuestions ?? []).map((q, j) => <Text key={j} style={styles.bullet}>• {q}</Text>)}
-              {(sc.interpretation ?? []).length > 0 && <Text style={styles.cardLabel}>Interpret</Text>}
-              {(sc.interpretation ?? []).map((x, j) => <Text key={j} style={styles.bullet}>• {x}</Text>)}
-              {(sc.crossReferences ?? []).length > 0 && <Text style={styles.cardLabel}>Cross-refs</Text>}
-              {(sc.crossReferences ?? []).map((cr, j) => {
-                const crKey = `sc${i}-cr${j}`;
-                const isExpanded = !!expandedCrossRef[crKey];
-                return (
-                  <View key={j} style={styles.crossRefItem}>
-                    <Pressable onPress={() => toggleCrossRef(crKey)} accessibilityRole="button" accessibilityState={{ expanded: isExpanded }}>
-                      <Text style={styles.crossRefChip}>{cr.ref} — {cr.why}</Text>
-                    </Pressable>
-                    {isExpanded && (
-                      <View style={styles.crossRefExpand}>
-                        <Text style={styles.scriptureRef}>{cr.ref}</Text>
-                        {cr.passage && canShowFullText("BIBLE") ? <Text style={styles.scripturePassage}>{cr.passage}</Text> : (
-                          <Pressable onPress={() => cr.url && Linking.openURL(cr.url)}><Text style={styles.linkText}>Open in browser</Text></Pressable>
-                        )}
+                {isExpanded && (
+                  <View style={styles.keyMomentsSection}>
+                    {keyMoments.map((km, i) => (
+                      <Text key={i} style={styles.bullet}>
+                        • {km}
+                      </Text>
+                    ))}
+                    {keyVerses.length > 0 && (
+                      <View style={styles.keyVersesRow}>
+                        {keyVerses.map((kv) => (
+                          <View key={kv} style={styles.themeChip}>
+                            <Text style={styles.themeChipText}>{kv}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {crossRefs.length > 0 && (
+                      <View style={styles.crossRefChipRow}>
+                        {crossRefs.map((cr) => (
+                          <Pressable
+                            key={cr.label + cr.url}
+                            onPress={() => cr.url && Linking.openURL(cr.url)}
+                            style={styles.crossRefPill}
+                          >
+                            <Text style={styles.crossRefPillText}>{cr.label}</Text>
+                          </Pressable>
+                        ))}
                       </View>
                     )}
                   </View>
-                );
-              })}
-              <Pressable onPress={() => (sc.officialUrl || sc.url) && Linking.openURL(sc.officialUrl || sc.url)} style={styles.linkBtn}>
-                <Text style={styles.linkBtnText}>Open</Text>
-              </Pressable>
-            </View>
-          );
+                )}
+              </View>
+            );
           })}
 
-          {isLDS && (plan.talks ?? []).length > 0 && (
-            <>
-              <Text style={styles.sectionTitle}>Talks from General Conference</Text>
-              {(plan.talks ?? []).map((t, i) => (
-                <View key={i} style={styles.card}>
-                  <Text style={styles.cardTitle}>{t.title}</Text>
-                  {t.speaker ? <Text style={styles.cardMeta}>{t.speaker}</Text> : null}
-                  {t.conference ? <Text style={styles.cardMeta}>{t.conference}</Text> : null}
-                  <Text style={styles.cardSummary}>{t.summary}</Text>
-                  {t.why && t.why.length > 0 && t.why.map((w, j) => <Text key={j} style={styles.bullet}>• {w}</Text>)}
-                  {t.themes && t.themes.length > 0 && (
-                    <View style={styles.themesRow}>
-                      {t.themes.map((th, j) => (
-                        <View key={j} style={styles.themeChip}><Text style={styles.themeChipText}>{th}</Text></View>
+          {/* SECTION 4 — OPTIONAL DEEP DIVE */}
+          {showDeepDive && plan.deepDive && (plan.deepDive.backgroundBullets || plan.deepDive.crossRefs || (isLDS && plan.deepDive.talk)) ? (
+            <View style={styles.deepDiveContainer}>
+              <Pressable
+                onPress={() => setDeepDiveOpen((prev) => !prev)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: deepDiveOpen }}
+                style={styles.deepDiveHeader}
+              >
+                <Text style={styles.deepDiveHeaderText}>
+                  {deepDiveOpen ? "▼" : "▶"} Want more context?
+                </Text>
+              </Pressable>
+              {deepDiveOpen && (
+                <View style={styles.deepDiveBody}>
+                  {(plan.deepDive.backgroundBullets ?? []).slice(0, 4).map((b, i) => (
+                    <Text key={i} style={styles.bullet}>
+                      • {b}
+                    </Text>
+                  ))}
+                  {(plan.deepDive.crossRefs ?? []).length > 0 && (
+                    <View style={styles.crossRefChipRow}>
+                      {(plan.deepDive.crossRefs ?? []).map((cr) => (
+                        <Pressable
+                          key={cr.label + cr.url}
+                          onPress={() => cr.url && Linking.openURL(cr.url)}
+                          style={styles.crossRefPill}
+                        >
+                          <Text style={styles.crossRefPillText}>{cr.label}</Text>
+                        </Pressable>
                       ))}
                     </View>
                   )}
-                  {t.officialUrl ? (
-                    <Pressable onPress={() => Linking.openURL(t.officialUrl!)} style={styles.linkBtn}>
-                      <Text style={styles.linkBtnText}>Read Full Talk</Text>
-                    </Pressable>
-                  ) : (
-                    <Text style={styles.linkUnavailable}>Link unavailable</Text>
+                  {isLDS && plan.deepDive.talk && (
+                    <View style={styles.talkCard}>
+                      <Text style={styles.cardTitle}>{plan.deepDive.talk.title}</Text>
+                      <Text style={styles.cardMeta}>{plan.deepDive.talk.speaker}</Text>
+                      <Text style={styles.cardSummary}>{plan.deepDive.talk.whyOneLine}</Text>
+                      {plan.deepDive.talk.officialUrl ? (
+                        <Pressable
+                          onPress={() => Linking.openURL(plan.deepDive.talk!.officialUrl)}
+                          style={styles.linkBtn}
+                        >
+                          <Text style={styles.linkBtnText}>Read full talk</Text>
+                        </Pressable>
+                      ) : (
+                        <Text style={styles.linkUnavailable}>Link unavailable</Text>
+                      )}
+                    </View>
                   )}
                 </View>
-              ))}
-            </>
-          )}
+              )}
+            </View>
+          ) : null}
 
-          {plan.articles && plan.articles.length > 0 && (
-            <>
-              <Text style={styles.sectionTitle}>Articles</Text>
-              {plan.articles.map((a, i) => (
-                <View key={i} style={styles.card}>
-                  <Text style={styles.cardTitle}>{a.title}</Text>
-                  <Text style={styles.cardSummary}>{a.summary}</Text>
-                  <Pressable onPress={() => a.url && Linking.openURL(a.url)} style={styles.linkBtn}>
-                    <Text style={styles.linkBtnText}>Open</Text>
-                  </Pressable>
-                </View>
-              ))}
-            </>
-          )}
-
+          {/* SECTION 5 — REFLECTION */}
           <Text style={styles.sectionTitle}>Reflection</Text>
-          {(plan.reflectionPrompts ?? []).map((p, i) => <Text key={i} style={styles.bullet}>• {p}</Text>)}
-
-          <Text style={styles.sectionTitle}>Journal</Text>
-          <Text style={styles.journalLabel}>What I learned</Text>
-          <TextInput style={styles.journalInput} value={journalLearned} onChangeText={setJournalLearned} multiline placeholder="..." />
-          <Text style={styles.journalLabel}>What I felt</Text>
-          <TextInput style={styles.journalInput} value={journalFelt} onChangeText={setJournalFelt} multiline placeholder="..." />
-          <Text style={styles.journalLabel}>Action to take</Text>
-          <TextInput style={styles.journalInput} value={journalAction} onChangeText={setJournalAction} multiline placeholder="..." />
-          <Pressable onPress={handleSaveJournal} style={styles.saveJournalBtn} disabled={savingJournal}>
-            <Text style={styles.saveJournalBtnText}>{savingJournal ? "Saving…" : "Save journal"}</Text>
-          </Pressable>
+          <View style={styles.reflectionCard}>
+            {(plan.reflectionPrompts ?? [])
+              .slice(0, 2)
+              .map((p, i) => (
+                <Text key={i} style={styles.bullet}>
+                  • {p}
+                </Text>
+              ))}
+            <Pressable
+              onPress={() => setReflectionOpen((prev) => !prev)}
+              style={styles.writeThoughtBtn}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: reflectionOpen }}
+            >
+              <Text style={styles.writeThoughtText}>
+                {reflectionOpen ? "Hide thought" : "Write a thought"}
+              </Text>
+            </Pressable>
+            {reflectionOpen && (
+              <View style={styles.reflectionInputContainer}>
+                <TextInput
+                  style={styles.journalInput}
+                  value={journalLearned}
+                  onChangeText={setJournalLearned}
+                  multiline
+                  placeholder="Jot down a brief thought…"
+                />
+                <Pressable
+                  onPress={handleSaveJournal}
+                  style={styles.saveJournalBtn}
+                  disabled={savingJournal}
+                >
+                  <Text style={styles.saveJournalBtnText}>
+                    {savingJournal ? "Saving…" : "Save"}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
 
           <Pressable onPress={handleFinishSession} style={styles.finishBtn}>
             <Text style={styles.finishBtnText}>Finish session</Text>
@@ -575,11 +676,20 @@ export default function StudyScreen() {
         ))}
       </View>
 
-      <Text style={styles.label}>Mode</Text>
+      <Text style={styles.label}>Study depth</Text>
       <View style={styles.modeRow}>
-        {(["devotional", "deep", "challenge"] as const).map((m) => (
-          <Pressable key={m} onPress={() => setMode(m)} style={[styles.modeBtn, mode === m && styles.modeBtnActive]}>
-            <Text style={[styles.modeBtnText, mode === m && styles.modeBtnTextActive]}>{m === "devotional" ? "Devotional" : m === "deep" ? "Deep Study" : "Challenge"}</Text>
+        {DEPTH_OPTIONS.map((opt) => (
+          <Pressable
+            key={opt.value}
+            onPress={() => {
+              setStudyDepth(opt.value);
+              setMode(opt.mode);
+            }}
+            style={[styles.modeBtn, studyDepth === opt.value && styles.modeBtnActive]}
+          >
+            <Text style={[styles.modeBtnText, studyDepth === opt.value && styles.modeBtnTextActive]}>
+              {opt.label}
+            </Text>
           </Pressable>
         ))}
       </View>

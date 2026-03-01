@@ -56,10 +56,12 @@ export default async function handler(req, res) {
     }
     body = body || {};
 
-    const { durationMin, topic, mode, faithTradition, studyDisplayMode } = body;
+    const { durationMin, topic, mode, faithTradition, studyDisplayMode, studyDepth } = body;
     const validDurations = [15, 30, 60];
     const validModes = ["devotional", "deep", "challenge"];
     const displayMode = ["KEY_VERSES", "FULL_CHAPTER", "BOTH"].includes(studyDisplayMode) ? studyDisplayMode : "BOTH";
+    const validDepths = ["QUICK", "GUIDED", "DEEP_DIVE"];
+    const depth = validDepths.includes(studyDepth) ? studyDepth : "GUIDED";
 
     if (!validDurations.includes(Number(durationMin))) {
       return send(res, 400, { error: "durationMin must be 15, 30, or 60" });
@@ -81,7 +83,7 @@ export default async function handler(req, res) {
     const allowFullBibleText = process.env.ALLOW_FULL_BIBLE_TEXT === "true" || process.env.ALLOW_FULL_BIBLE_TEXT === "1";
 
     const scriptureSourceRule = isLDS
-      ? "- SCRIPTURES: Include Bible (OT/NT) AND Book of Mormon AND Doctrine and Covenants AND Pearl of Great Price. For each scripture set source: \"BIBLE\" | \"BOM\" | \"DNC\" | \"PGP\". Use reference as chapter or verse (e.g. \"1 Nephi 3\", \"Alma 32\", \"Matthew 5:14-16\"). For LDS scriptures set officialUrl to the exact churchofjesuschrist.org/study/scriptures URL when possible, otherwise use https://www.churchofjesuschrist.org/study/scriptures/search?lang=eng&query=REF."
+      ? "- SCRIPTURES: Include Bible (OT/NT) AND Book of Mormon AND Doctrine and Covenants AND Pearl of Great Price. For each scripture or reading card set source: \"BIBLE\" | \"BOM\" | \"DNC\" | \"PGP\". Use chapter-based references by default (e.g. \"1 Nephi 3\", \"Alma 32\", \"Matthew 5\"). For LDS scriptures set officialUrl to the exact churchofjesuschrist.org/study/scriptures URL when possible, otherwise use https://www.churchofjesuschrist.org/study/scriptures/search?lang=eng&query=REF."
       : "- SCRIPTURES: Bible only (OT/NT). Set source: \"BIBLE\". Use full book names. Set officialUrl to BibleGateway ESV URL.";
 
     const copyrightRule = `- COPYRIGHT: Do NOT include full verse/chapter text (passage) for Book of Mormon, Doctrine and Covenants, or Pearl of Great Price. For those sources only provide: reference, why, themes, keyVersesSummary (1-3 sentence AI summary of the key verses), background, and officialUrl. For BIBLE: ${allowFullBibleText ? "you may include passage (KJV or ESV) for display." : "do NOT include passage; provide keyVersesSummary and officialUrl only."} For General Conference talks: never include full talk text; only title, speaker, conference, why, themes, summary (short), and officialUrl.`;
@@ -90,57 +92,58 @@ export default async function handler(req, res) {
       ? "- TALKS: Include 1-2 General Conference talks. For each talk provide officialUrl: the exact URL to the talk on churchofjesuschrist.org (e.g. https://www.churchofjesuschrist.org/study/general-conference/2024/04/surname?lang=eng). If you cannot determine the exact URL, leave officialUrl empty and the app will show \"Link unavailable\"."
       : "- TALKS: Return empty array []. Do NOT include conference talks for non-LDS users.";
 
-    const system = `You generate a Christian study session plan. Return ONLY valid JSON matching this schema (no markdown, no code fence):
+    const system = `You generate a Christian study session plan focused on GUIDED SPIRITUAL FOCUS.
+
+Return ONLY valid JSON matching this schema (no markdown, no code fence):
 
 {
-  "title": string (short session title),
-  "durationMin": ${durationMin},
-  "topic": string,
-  "mode": "${mode}",
-  "studyDisplayMode": "${displayMode}",
-  "planSteps": [{"minutes": number, "label": string, "instruction": string}],
-  "scriptures": [{
+  "bigIdeaHeadline": string,                 // one sentence, 10–18 words
+  "bigIdeaSupport"?: string,                 // optional short second sentence
+  "studyDepth": "QUICK" | "GUIDED" | "DEEP_DIVE",
+  "studyPlan": {
+    "read": Array<{
+      "source": "BIBLE" | "BOM" | "DNC" | "PGP",
+      "reference": string,                   // chapter-based, e.g. "1 Nephi 3", "Alma 32", "Matthew 5"
+      "url": string                          // official scripture URL (churchofjesuschrist.org or BibleGateway)
+    }>,
+    "lookFor": string,                       // one focus lens sentence
+    "ponder": string                         // one reflection question
+  },
+  "readingCards": Array<{
     "source": "BIBLE" | "BOM" | "DNC" | "PGP",
-    "reference": string (e.g. "1 Nephi 3", "Alma 32", "Matthew 5" for chapter; or "Matthew 5:14-16" only when studyDisplayMode is KEY_VERSES or BOTH),
-    "title": string,
-    "keyVerses": string[] (ONLY when studyDisplayMode is KEY_VERSES or BOTH; when FULL_CHAPTER omit or leave empty),
-    "why": string[] (1-3 bullets why this applies),
-    "themes": string[] (e.g. ["obedience", "faith"]),
-    "officialUrl": string (required: churchofjesuschrist.org for LDS, BibleGateway for Bible),
-    "keyVersesSummary": string (AI summary of key verses; for BOM/DNC/PGP always provide; for BIBLE provide if no passage),
-    "background": string (1-2 sentences),
-    "observationQuestions": string[],
-    "interpretation": string[],
-    "crossReferences": [{"ref": string, "why": string, "url": string}],
-    "summary": string,
-    "passage": string (ONLY for source BIBLE when allowed; otherwise omit or empty)
-  }],
-  "talks": [{
-    "title": string,
-    "speaker": string,
-    "conference": string (e.g. "Apr 2024"),
-    "summary": string (short),
-    "why": string[],
-    "themes": string[],
-    "officialUrl": string (exact talk URL on churchofjesuschrist.org when known; else empty)
-  }],
-  "articles": [{"title": string, "summary": string, "url": string}],
-  "reflectionPrompts": string[],
-  "actionStep": string,
-  "studySummary": string (2-4 sentence recap of what was recommended and why; no next-step checklist),
-  "optional": {"memoryVerse": string (optional), "prayerPrompt": string (optional)}
+    "reference": string,                     // chapter-based
+    "url": string,                           // official URL for the chapter
+    "whyOneLine": string,                    // one short line why this chapter
+    "keyMoments": string[],                  // 3–6 bullets describing what happens / what to notice
+    "keyVerses"?: string[],                  // verse references ONLY (e.g. "1 Nephi 3:7")
+    "crossRefs"?: Array<{ "label": string, "url": string }>
+  }>,
+  "deepDive"?: {
+    "backgroundBullets"?: string[],          // 2–4 bullets of extra context
+    "crossRefs"?: Array<{ "label": string, "url": string }>,
+    "talk"?: {                               // ONLY when user is LDS
+      "title": string,
+      "speaker": string,
+      "whyOneLine": string,
+      "officialUrl": string                  // exact churchofjesuschrist.org/study/general-conference/... URL
+    }
+  },
+  "reflectionPrompts": string[]              // 1–2 short prompts max
 }
 
 RULES:
-- planSteps[].minutes must sum to exactly ${durationMin}.
-${copyrightRule}
+- studyDepth is "${depth}" for this request.
+- For QUICK: keep readingCards to 1 item, keyMoments <= 3 bullets, deepDive omitted.
+- For GUIDED: 1–3 readingCards, keyMoments up to 4–5 bullets, deepDive optional and collapsed by default.
+- For DEEP_DIVE: up to 3 readingCards, 3–6 keyMoments, and include deepDive with backgroundBullets and crossRefs; include a talk only if LDS.
+- ${copyrightRule}
 - Never invent or guess URLs. For talks, officialUrl must be a real churchofjesuschrist.org/study/general-conference/... URL or leave empty.
 - User faithTradition: ${tradition}. ${scriptureSourceRule}
 ${talksRule}
-- studyDisplayMode: ${displayMode}. STRICT: When FULL_CHAPTER — every scripture reference MUST be chapter-only (e.g. "1 Nephi 3", "Alma 32", "Matthew 5"). Do NOT include verse numbers in reference. Do NOT include keyVerses. When KEY_VERSES — use verse-level references and include keyVerses. When BOTH — include both chapter refs and keyVerses where helpful.
-- Mode: devotional=gentle; deep=more questions/cross-refs; challenge=conviction question + concrete actionStep.`;
+- All LDS scripture and talk content MUST follow copyright rules: no full text, only references, summaries, key moments, and official links.
+- Bible passages: ${allowFullBibleText ? "you MAY include full text in your internal reasoning, but DO NOT put full verse text in keyMoments; they must be summaries." : "do NOT include full verse text; only summaries, key moments, and references."}`;
 
-    const user = `Create a ${durationMin}-minute ${mode} study session on topic: "${String(topic).trim()}". Return only the JSON object.`;
+    const user = `Create a ${durationMin}-minute ${mode} (${depth.toLowerCase().replace("_", " ")}) study session on topic: "${String(topic).trim()}". Return only the JSON object.`;
 
     const client = new OpenAI({ apiKey });
     const completion = await client.chat.completions.create({
@@ -165,7 +168,7 @@ ${talksRule}
       });
     }
 
-    const plan = raw?.plan ?? raw?.studyPlan ?? raw?.data ?? raw;
+    const plan = raw?.plan ?? raw?.data ?? raw;
     const src = plan && typeof plan === "object" && !Array.isArray(plan) ? plan : raw;
 
     const planSteps = Array.isArray(src.planSteps) ? src.planSteps : [];
@@ -181,65 +184,165 @@ ${talksRule}
       };
     }
 
-    const scriptures = (Array.isArray(src.scriptures) ? src.scriptures : []).map((s) => {
-      let ref = String(s?.reference ?? s?.ref ?? "").trim() || String(s?.ref ?? "");
-      if (displayMode === "FULL_CHAPTER" && ref) {
-        const chapterOnly = ref.replace(/\s*:\s*\d+(-\d+)?\s*$/i, "").trim();
-        if (chapterOnly) ref = chapterOnly;
-      }
-      const source = ["BOM", "DNC", "PGP", "BIBLE"].includes(s?.source) ? s.source : (ref.match(/^(1|2)\s*Nephi|Alma|Mosiah|Helaman|Moroni|Jacob|Enos|Jarom|Omni|Words of Mormon|Doctrine|Pearl|Moses|Abraham|Joseph Smith—Matthew|Joseph Smith—History|Articles of Faith/i) ? "BOM" : "BIBLE");
-      const isLdsSource = source === "BOM" || source === "DNC" || source === "PGP";
+    // New schema fields -------------------------------------------------------
+    const bigIdeaHeadline = src?.bigIdeaHeadline != null ? String(src.bigIdeaHeadline) : "";
+    const bigIdeaSupport = src?.bigIdeaSupport != null ? String(src.bigIdeaSupport) : undefined;
+
+    const readingCardsRaw = Array.isArray(src.readingCards) ? src.readingCards : [];
+    const readingCards = readingCardsRaw
+      .map((c) => {
+        const reference = String(c?.reference ?? "").trim();
+        if (!reference) return null;
+        const srcType = ["BOM", "DNC", "PGP", "BIBLE"].includes(c?.source)
+          ? c.source
+          : (reference.match(/^(1|2)\s*Nephi|Alma|Mosiah|Helaman|Moroni|Jacob|Enos|Jarom|Omni|Words of Mormon|Doctrine|Pearl|Moses|Abraham|Joseph Smith—Matthew|Joseph Smith—History|Articles of Faith/i)
+              ? "BOM"
+              : "BIBLE");
+        if (!isLDS && (srcType === "BOM" || srcType === "DNC" || srcType === "PGP")) {
+          // Non-LDS users should not see LDS-only sources.
+          return null;
+        }
+        const baseUrl = c?.url && String(c.url).startsWith("http")
+          ? c.url
+          : (srcType === "BIBLE" ? bibleGatewayUrl(reference) : churchScriptureUrl(reference, srcType));
+        return {
+          source: srcType,
+          reference,
+          url: baseUrl,
+          whyOneLine: String(c?.whyOneLine ?? ""),
+          keyMoments: Array.isArray(c?.keyMoments) ? c.keyMoments.map((km) => String(km)) : [],
+          keyVerses: Array.isArray(c?.keyVerses) ? c.keyVerses.map((kv) => String(kv)) : undefined,
+          crossRefs: Array.isArray(c?.crossRefs)
+            ? c.crossRefs.map((cr) => ({
+                label: String(cr?.label ?? ""),
+                url: cr?.url && String(cr.url).startsWith("http") ? cr.url : safeUrl(cr?.url, cr?.label || reference)
+              }))
+            : undefined
+        };
+      })
+      .filter(Boolean);
+
+    const studyPlanRaw = src?.studyPlan && typeof src.studyPlan === "object" ? src.studyPlan : null;
+    const studyPlan = {
+      read: Array.isArray(studyPlanRaw?.read)
+        ? studyPlanRaw.read
+            .map((r) => {
+              const reference = String(r?.reference ?? "").trim();
+              if (!reference) return null;
+              const srcType = ["BOM", "DNC", "PGP", "BIBLE"].includes(r?.source)
+                ? r.source
+                : (reference.match(/^(1|2)\s*Nephi|Alma|Mosiah|Helaman|Moroni|Jacob|Enos|Jarom|Omni|Words of Mormon|Doctrine|Pearl|Moses|Abraham|Joseph Smith—Matthew|Joseph Smith—History|Articles of Faith/i)
+                    ? "BOM"
+                    : "BIBLE");
+              if (!isLDS && (srcType === "BOM" || srcType === "DNC" || srcType === "PGP")) {
+                return null;
+              }
+              const baseUrl = r?.url && String(r.url).startsWith("http")
+                ? r.url
+                : (srcType === "BIBLE" ? bibleGatewayUrl(reference) : churchScriptureUrl(reference, srcType));
+              return { source: srcType, reference, url: baseUrl };
+            })
+            .filter(Boolean)
+        : readingCards.slice(0, 2).map((c) => ({
+            source: c.source,
+            reference: c.reference,
+            url: c.url
+          })),
+      lookFor: studyPlanRaw?.lookFor != null ? String(studyPlanRaw.lookFor) : (bigIdeaHeadline || "Notice what God highlights for you."),
+      ponder:
+        studyPlanRaw?.ponder != null
+          ? String(studyPlanRaw.ponder)
+          : "What do you feel invited to do in response?"
+    };
+
+    const deepDiveRaw = src?.deepDive && typeof src.deepDive === "object" ? src.deepDive : null;
+    const deepDive = deepDiveRaw
+      ? {
+          backgroundBullets: Array.isArray(deepDiveRaw.backgroundBullets)
+            ? deepDiveRaw.backgroundBullets.map((b) => String(b))
+            : undefined,
+          crossRefs: Array.isArray(deepDiveRaw.crossRefs)
+            ? deepDiveRaw.crossRefs.map((cr) => ({
+                label: String(cr?.label ?? ""),
+                url: cr?.url && String(cr.url).startsWith("http") ? cr.url : safeUrl(cr?.url, cr?.label || topic)
+              }))
+            : undefined,
+          talk:
+            isLDS && deepDiveRaw.talk && typeof deepDiveRaw.talk === "object"
+              ? (() => {
+                  const t = deepDiveRaw.talk;
+                  const url = t?.officialUrl && String(t.officialUrl).startsWith("http") ? t.officialUrl : null;
+                  if (!url) return undefined;
+                  return {
+                    title: String(t?.title ?? ""),
+                    speaker: String(t?.speaker ?? ""),
+                    whyOneLine: String(t?.whyOneLine ?? ""),
+                    officialUrl: url
+                  };
+                })()
+              : undefined
+        }
+      : undefined;
+
+    // Legacy scripture array built from readingCards so history + old UI continue to work.
+    const scriptures = readingCards.map((c) => {
+      const ref = c.reference;
+      const source = c.source;
       const allowPassage = source === "BIBLE" && allowFullBibleText;
-      const officialUrl = s?.officialUrl && String(s.officialUrl).startsWith("http") ? s.officialUrl : (source === "BIBLE" ? bibleGatewayUrl(ref) : churchScriptureUrl(ref, source));
-      const cr = Array.isArray(s?.crossReferences) ? s.crossReferences : [];
-      const keyVerses = displayMode === "FULL_CHAPTER" ? undefined : (Array.isArray(s?.keyVerses) ? s.keyVerses.map((v) => String(v)) : undefined);
+      const officialUrl = c.url && String(c.url).startsWith("http")
+        ? c.url
+        : (source === "BIBLE" ? bibleGatewayUrl(ref) : churchScriptureUrl(ref, source));
       return {
         ref,
-        title: String(s?.title ?? ""),
+        title: ref,
         source,
-        keyVerses,
-        why: Array.isArray(s?.why) ? s.why.map((w) => String(w)) : undefined,
-        themes: Array.isArray(s?.themes) ? s.themes.map((t) => String(t)) : undefined,
+        keyVerses: displayMode === "FULL_CHAPTER" ? undefined : c.keyVerses,
+        why: [c.whyOneLine].filter(Boolean),
+        themes: undefined,
         officialUrl,
-        keyVersesSummary: s?.keyVersesSummary != null ? String(s.keyVersesSummary) : undefined,
-        passage: allowPassage ? String(s?.passage ?? "") : "",
-        background: String(s?.background ?? ""),
-        observationQuestions: Array.isArray(s?.observationQuestions) ? s.observationQuestions : [],
-        interpretation: Array.isArray(s?.interpretation) ? s.interpretation : [],
-        crossReferences: cr.map((c) => ({
-          ref: String(c?.ref ?? ""),
-          why: String(c?.why ?? ""),
-          url: c?.url && String(c.url).startsWith("http") ? c.url : bibleGatewayUrl(c?.ref || ref),
+        keyVersesSummary: c.keyMoments && c.keyMoments.length ? c.keyMoments.join(" ") : undefined,
+        passage: allowPassage ? "" : "",
+        background: "",
+        observationQuestions: [],
+        interpretation: [],
+        crossReferences: (c.crossRefs || []).map((cr) => ({
+          ref: cr.label,
+          why: "",
+          url: cr.url,
           passage: undefined
         })),
-        summary: String(s?.summary ?? ""),
+        summary: c.whyOneLine,
         url: officialUrl
       };
     });
 
-    const rawTalks = isLDS ? (Array.isArray(src.talks) ? src.talks : []) : [];
-    const talks = rawTalks.map((t) => {
-      const officialUrl = t?.officialUrl && String(t.officialUrl).startsWith("http") ? t.officialUrl : null;
-      return {
-        title: String(t?.title ?? ""),
-        speaker: String(t?.speaker ?? ""),
-        summary: String(t?.summary ?? ""),
-        officialUrl: officialUrl || undefined,
-        url: officialUrl || churchConferenceUrl(),
-        why: Array.isArray(t?.why) ? t.why.map((w) => String(w)) : undefined,
-        themes: Array.isArray(t?.themes) ? t.themes.map((x) => String(x)) : undefined,
-        conference: t?.conference != null ? String(t.conference) : undefined
-      };
-    });
+    // Legacy talks array derived from deepDive.talk when present.
+    const talks =
+      isLDS && deepDive && deepDive.talk
+        ? [
+            {
+              title: deepDive.talk.title,
+              speaker: deepDive.talk.speaker,
+              summary: deepDive.talk.whyOneLine,
+              officialUrl: deepDive.talk.officialUrl,
+              url: deepDive.talk.officialUrl,
+              why: [deepDive.talk.whyOneLine],
+              themes: undefined,
+              conference: undefined
+            }
+          ]
+        : [];
 
-    const articles = (Array.isArray(src.articles) ? src.articles : []).map((a) => ({
-      title: String(a?.title ?? ""),
-      summary: String(a?.summary ?? ""),
-      url: safeUrl(a?.url, a?.title || topic)
-    }));
+    const articles = [];
 
-    const reflectionPrompts = Array.isArray(src.reflectionPrompts) ? src.reflectionPrompts : [];
-    const actionStep = String(src?.actionStep ?? "");
+    const reflectionPrompts =
+      Array.isArray(src.reflectionPrompts) && src.reflectionPrompts.length
+        ? src.reflectionPrompts.map((p) => String(p))
+        : [
+            "What stood out to you?",
+            "What do you feel invited to do?"
+          ];
+    const actionStep = "";
     const studySummary = src?.studySummary != null ? String(src.studySummary) : undefined;
     const optional = src?.optional && typeof src.optional === "object"
       ? {
@@ -253,7 +356,13 @@ ${talksRule}
       durationMin: Number(durationMin),
       topic: String(topic).trim(),
       mode: String(mode),
+      bigIdeaHeadline,
+      bigIdeaSupport,
+      studyDepth: depth,
       planSteps,
+      studyPlan,
+      readingCards,
+      deepDive,
       scriptures,
       talks,
       articles,

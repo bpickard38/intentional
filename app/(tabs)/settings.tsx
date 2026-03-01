@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { FaithTradition, UserProfile, StudyDisplayMode } from "@/src/core/types";
+import type { FaithTradition, UserProfile, StudyDisplayMode, StudyDepth } from "@/src/core/types";
 import { getJson, setJson, removeKey } from "@/src/core/storage";
 
 const PROFILE_KEY = "profile:v1";
@@ -21,6 +21,12 @@ const STUDY_DISPLAY_MODES: { value: StudyDisplayMode; label: string }[] = [
   { value: "BOTH", label: "Both" },
 ];
 
+const STUDY_DEPTH_OPTIONS: { value: StudyDepth; label: string }[] = [
+  { value: "QUICK", label: "Quick" },
+  { value: "GUIDED", label: "Guided" },
+  { value: "DEEP_DIVE", label: "Deep Dive" },
+];
+
 export default function SettingsScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
@@ -31,6 +37,7 @@ export default function SettingsScreen() {
         id: "default",
         faithTradition: "Christian",
         studyDisplayMode: "BOTH",
+        studyDepth: "GUIDED",
         createdAt: new Date().toISOString(),
       }
     );
@@ -45,6 +52,7 @@ export default function SettingsScreen() {
       id: profile?.id ?? "default",
       faithTradition: t,
       studyDisplayMode: profile?.studyDisplayMode ?? "BOTH",
+      studyDepth: profile?.studyDepth ?? "GUIDED",
       createdAt: profile?.createdAt ?? new Date().toISOString(),
     };
     await setJson(PROFILE_KEY, next);
@@ -56,6 +64,7 @@ export default function SettingsScreen() {
       id: profile?.id ?? "default",
       faithTradition: profile?.faithTradition ?? "Christian",
       studyDisplayMode: m,
+      studyDepth: profile?.studyDepth ?? "GUIDED",
       createdAt: profile?.createdAt ?? new Date().toISOString(),
     };
     await setJson(PROFILE_KEY, next);
@@ -103,6 +112,30 @@ export default function SettingsScreen() {
             style={[styles.optionBtn, (profile.studyDisplayMode ?? "BOTH") === value && styles.optionBtnActive]}
           >
             <Text style={[styles.optionText, (profile.studyDisplayMode ?? "BOTH") === value && styles.optionTextActive]}>
+              {label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.label}>Study depth</Text>
+      <View style={styles.options}>
+        {STUDY_DEPTH_OPTIONS.map(({ value, label }) => (
+          <Pressable
+            key={value}
+            onPress={async () => {
+              const next: UserProfile = {
+                id: profile.id ?? "default",
+                faithTradition: profile.faithTradition ?? "Christian",
+                studyDisplayMode: profile.studyDisplayMode ?? "BOTH",
+                studyDepth: value,
+                createdAt: profile.createdAt ?? new Date().toISOString(),
+              };
+              await setJson(PROFILE_KEY, next);
+              setProfile(next);
+            }}
+            style={[styles.optionBtn, (profile.studyDepth ?? "GUIDED") === value && styles.optionBtnActive]}
+          >
+            <Text style={[styles.optionText, (profile.studyDepth ?? "GUIDED") === value && styles.optionTextActive]}>
               {label}
             </Text>
           </Pressable>

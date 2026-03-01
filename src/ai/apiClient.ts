@@ -1,5 +1,5 @@
 import type { StudyPlan, StudyPlanV2 } from "@/src/core/types";
-import type { FaithTradition, ScriptureSource, StudyDisplayMode } from "@/src/core/types";
+import type { FaithTradition, ScriptureSource, StudyDisplayMode, StudyDepth } from "@/src/core/types";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
 
@@ -163,8 +163,91 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
     return { title: ensureString(x.title, "Article"), summary: ensureString(x.summary, ""), url: ensureString(x.url, "") };
   });
   const reflectionPrompts = ensureArray(o.reflectionPrompts, []).map((p) => ensureString(p, ""));
-  const actionStep = ensureString(o.actionStep, "Reflect and choose one action.");
+  const actionStep = ensureString(o.actionStep, "");
   const studySummary = o.studySummary != null ? ensureString(o.studySummary, "") : undefined;
+
+  const bigIdeaHeadline = o.bigIdeaHeadline != null ? ensureString(o.bigIdeaHeadline, "") : undefined;
+  const bigIdeaSupport = o.bigIdeaSupport != null ? ensureString(o.bigIdeaSupport, "") : undefined;
+  const studyDepth = ((): StudyDepth | undefined => {
+    const d = o.studyDepth;
+    if (d === "QUICK" || d === "GUIDED" || d === "DEEP_DIVE") return d;
+    return undefined;
+  })();
+
+  const studyPlan =
+    o.studyPlan && typeof o.studyPlan === "object"
+      ? (() => {
+          const sp = o.studyPlan as Record<string, unknown>;
+          const read = ensureArray(sp.read, []).map((r: unknown) => {
+            const x = (r && typeof r === "object" ? r : {}) as Record<string, unknown>;
+            const source = ["BOM", "DNC", "PGP", "BIBLE"].includes(x.source as string)
+              ? (x.source as ScriptureSource)
+              : "BIBLE";
+            return {
+              source,
+              reference: ensureString(x.reference, ""),
+              url: ensureString(x.url, ""),
+            };
+          });
+          return {
+            read,
+            lookFor: ensureString(sp.lookFor, ""),
+            ponder: ensureString(sp.ponder, ""),
+          };
+        })()
+      : undefined;
+
+  const readingCards = ensureArray(o.readingCards, []).map((c: unknown) => {
+    const x = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
+    const source = ["BOM", "DNC", "PGP", "BIBLE"].includes(x.source as string)
+      ? (x.source as ScriptureSource)
+      : "BIBLE";
+    return {
+      source,
+      reference: ensureString(x.reference, ""),
+      url: ensureString(x.url, ""),
+      whyOneLine: ensureString(x.whyOneLine, ""),
+      keyMoments: ensureArray(x.keyMoments, []).map((km) => ensureString(km, "")),
+      keyVerses: Array.isArray(x.keyVerses) ? (x.keyVerses as string[]).map((kv) => String(kv)) : undefined,
+      crossRefs: ensureArray(x.crossRefs, []).map((cr: unknown) => {
+        const y = (cr && typeof cr === "object" ? cr : {}) as Record<string, unknown>;
+        return {
+          label: ensureString(y.label, ""),
+          url: ensureString(y.url, ""),
+        };
+      }),
+    };
+  });
+
+  const deepDive =
+    o.deepDive && typeof o.deepDive === "object"
+      ? (() => {
+          const d = o.deepDive as Record<string, unknown>;
+          const backgroundBullets = ensureArray(d.backgroundBullets, []).map((b) => ensureString(b, ""));
+          const crossRefs = ensureArray(d.crossRefs, []).map((cr: unknown) => {
+            const y = (cr && typeof cr === "object" ? cr : {}) as Record<string, unknown>;
+            return {
+              label: ensureString(y.label, ""),
+              url: ensureString(y.url, ""),
+            };
+          });
+          let talk;
+          if (d.talk && typeof d.talk === "object") {
+            const t = d.talk as Record<string, unknown>;
+            talk = {
+              title: ensureString(t.title, ""),
+              speaker: ensureString(t.speaker, ""),
+              whyOneLine: ensureString(t.whyOneLine, ""),
+              officialUrl: ensureString(t.officialUrl, ""),
+            };
+          }
+          return {
+            backgroundBullets: backgroundBullets.length ? backgroundBullets : undefined,
+            crossRefs: crossRefs.length ? crossRefs : undefined,
+            talk,
+          };
+        })()
+      : undefined;
   const totalStepMinutes = planSteps.reduce((sum, st) => sum + st.minutes, 0);
   const defaultSteps =
     totalStepMinutes <= 0
@@ -176,11 +259,17 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
     durationMin,
     topic,
     mode,
+    bigIdeaHeadline,
+    bigIdeaSupport,
+    studyDepth,
     planSteps: defaultSteps,
+    studyPlan,
+    readingCards,
+    deepDive,
     scriptures: scriptures.length ? scriptures : [{ ref: "", title: "Scripture", passage: "", background: "", observationQuestions: [], interpretation: [], crossReferences: [], summary: "No scriptures returned.", url: "" }],
     talks,
     articles,
-    reflectionPrompts: reflectionPrompts.length ? reflectionPrompts : ["What stood out?", "How will you apply this?"],
+    reflectionPrompts: reflectionPrompts.length ? reflectionPrompts : ["What stood out to you?", "What do you feel invited to do?"],
     actionStep,
     studySummary,
     optional: o.optional && typeof o.optional === "object" ? (o.optional as StudyPlanV2["optional"]) : undefined,
@@ -192,7 +281,8 @@ export async function generateStudySession(
   topic: string,
   mode: "devotional" | "deep" | "challenge",
   faithTradition: FaithTradition,
-  studyDisplayMode?: StudyDisplayMode
+  studyDisplayMode?: StudyDisplayMode,
+  studyDepth?: StudyDepth
 ): Promise<StudyPlanV2> {
   const url = apiUrl("generate-study-session");
   const data = await fetchJson<unknown>(url, {
@@ -201,6 +291,7 @@ export async function generateStudySession(
     mode,
     faithTradition,
     studyDisplayMode: studyDisplayMode ?? "BOTH",
+    studyDepth: studyDepth ?? "GUIDED",
     requestId: Date.now(),
   });
   const raw = (data && typeof data === "object" && ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).studyPlan ?? (data as Record<string, unknown>).data)) ?? data;
