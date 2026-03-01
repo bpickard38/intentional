@@ -3,9 +3,18 @@ import type { FaithTradition } from "@/src/core/types";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
 
+// Path prefix: default "api" -> /api/study-chat. Set EXPO_PUBLIC_API_PATH=root if API is deployed with api folder as project root (routes at /study-chat).
+const API_PATH = (process.env.EXPO_PUBLIC_API_PATH ?? "api").trim().toLowerCase();
+const API_PREFIX = API_PATH === "root" || API_PATH === "none" || API_PATH === "" ? "" : `/${API_PATH}`;
+
 function getBase(): string {
   if (!API_URL) throw new Error("EXPO_PUBLIC_API_URL is not set. Add it to .env and restart with: npx expo start -c");
   return API_URL;
+}
+
+function apiUrl(path: string): string {
+  const base = getBase();
+  return `${base}${API_PREFIX}/${path}`.replace(/\/+/g, "/");
 }
 
 function ensureArray<T>(v: unknown, def: T[]): T[] {
@@ -136,8 +145,7 @@ export async function generateStudySession(
   mode: "devotional" | "deep" | "challenge",
   faithTradition: FaithTradition
 ): Promise<StudyPlanV2> {
-  const base = getBase();
-  const url = `${base}/api/generate-study-session`;
+  const url = apiUrl("generate-study-session");
   const data = await fetchJson<unknown>(url, {
     durationMin,
     topic,
@@ -163,8 +171,7 @@ export async function studyChat(params: {
   userQuestion: string;
   lastMessages: { role: string; text: string }[];
 }): Promise<StudyChatResponse> {
-  const base = getBase();
-  const url = `${base}/api/study-chat`;
+  const url = apiUrl("study-chat");
   const data = await fetchJson<StudyChatResponse>(url, {
     plan: params.plan,
     mode: params.mode,
@@ -220,8 +227,7 @@ export async function generateStudyPlan(
   topic: string,
   faithTradition: FaithTradition
 ): Promise<StudyPlan> {
-  const base = getBase();
-  const url = `${base}/api/generate-study-session`;
+  const url = apiUrl("generate-study-session");
   const data = await fetchJson<unknown>(url, { durationMin, topic, faithTradition, requestId: Date.now() });
   const raw = (data && typeof data === "object" && ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).studyPlan ?? (data as Record<string, unknown>).data)) ?? data;
   return normalizePlan(raw);

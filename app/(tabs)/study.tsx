@@ -263,7 +263,21 @@ export default function StudyScreen() {
       await appendChatMessage(session.id, assistantMsg);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const errMsg: ChatMessage = { id: "msg-err-" + Date.now(), role: "assistant", text: msg.includes("EXPO_PUBLIC_API_URL") ? "API URL not set. Add EXPO_PUBLIC_API_URL to .env and run: npx expo start -c" : msg.includes("timed out") ? "Request timed out. Check your connection and try again." : msg.includes("Network") || msg.includes("Failed") ? "Couldn't reach the server. Is EXPO_PUBLIC_API_URL correct in .env? For a device, use your computer's IP (not localhost)." : `Error: ${msg.length > 120 ? msg.slice(0, 120) + "…" : msg}`, createdAt: new Date().toISOString() };
+      let displayMsg = msg;
+      if (msg.includes("404")) {
+        displayMsg = "API returned 404. If your API is deployed with the api folder as project root, add to .env: EXPO_PUBLIC_API_PATH=root then run: npx expo start -c";
+      } else if (msg.includes("EXPO_PUBLIC_API_URL")) {
+        displayMsg = "API URL not set. Add EXPO_PUBLIC_API_URL to .env and run: npx expo start -c";
+      } else if (msg.includes("timed out")) {
+        displayMsg = "Request timed out. Check your connection and try again.";
+      } else if (msg.includes("Network") || msg.includes("Failed")) {
+        displayMsg = "Couldn't reach the server. Is EXPO_PUBLIC_API_URL correct in .env? For a device, use your computer's IP (not localhost).";
+      } else if (msg.length > 120) {
+        displayMsg = `Error: ${msg.slice(0, 120)}…`;
+      } else if (!msg.startsWith("Error:")) {
+        displayMsg = `Error: ${msg}`;
+      }
+      const errMsg: ChatMessage = { id: "msg-err-" + Date.now(), role: "assistant", text: displayMsg, createdAt: new Date().toISOString() };
       setSession((prev) => (prev ? { ...prev, chat: [...(prev.chat ?? []), errMsg] } : null));
       await appendChatMessage(session.id, errMsg);
     } finally {
