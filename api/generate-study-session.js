@@ -189,7 +189,7 @@ ${talksRule}
     const bigIdeaSupport = src?.bigIdeaSupport != null ? String(src.bigIdeaSupport) : undefined;
 
     const readingCardsRaw = Array.isArray(src.readingCards) ? src.readingCards : [];
-    const readingCards = readingCardsRaw
+    let readingCards = readingCardsRaw
       .map((c) => {
         const reference = String(c?.reference ?? "").trim();
         if (!reference) return null;
@@ -221,6 +221,47 @@ ${talksRule}
         };
       })
       .filter(Boolean);
+
+    // Fallback: if model returned old "scriptures" array instead of "readingCards", build readingCards from it
+    if (readingCards.length === 0 && Array.isArray(src.scriptures) && src.scriptures.length > 0) {
+      readingCards = src.scriptures
+        .map((s) => {
+          const ref = String(s?.reference ?? s?.ref ?? "").trim();
+          if (!ref) return null;
+          const srcType = ["BOM", "DNC", "PGP", "BIBLE"].includes(s?.source)
+            ? s.source
+            : (ref.match(/^(1|2)\s*Nephi|Alma|Mosiah|Helaman|Moroni|Jacob|Enos|Jarom|Omni|Words of Mormon|Doctrine|Pearl|Moses|Abraham|Joseph Smith—Matthew|Joseph Smith—History|Articles of Faith/i)
+                ? "BOM"
+                : "BIBLE");
+          if (!isLDS && (srcType === "BOM" || srcType === "DNC" || srcType === "PGP")) return null;
+          const baseUrl = s?.officialUrl && String(s.officialUrl).startsWith("http")
+            ? s.officialUrl
+            : (srcType === "BIBLE" ? bibleGatewayUrl(ref) : churchScriptureUrl(ref, srcType));
+          const whyOneLine = Array.isArray(s?.why) && s.why.length
+            ? s.why[0]
+            : (s?.summary ?? s?.title ?? ref);
+          const keyMoments = [];
+          if (s?.keyVersesSummary) keyMoments.push(String(s.keyVersesSummary));
+          if (s?.background) keyMoments.push(String(s.background));
+          if (keyMoments.length === 0) keyMoments.push(whyOneLine);
+          const crossRefs = Array.isArray(s?.crossReferences)
+            ? s.crossReferences.map((cr) => ({
+                label: String(cr?.ref ?? ""),
+                url: cr?.url && String(cr.url).startsWith("http") ? cr.url : bibleGatewayUrl(cr?.ref || ref)
+              }))
+            : undefined;
+          return {
+            source: srcType,
+            reference: ref,
+            url: baseUrl,
+            whyOneLine: String(whyOneLine),
+            keyMoments,
+            keyVerses: Array.isArray(s?.keyVerses) ? s.keyVerses.map((v) => String(v)) : undefined,
+            crossRefs
+          };
+        })
+        .filter(Boolean);
+    }
 
     const studyPlanRaw = src?.studyPlan && typeof src.studyPlan === "object" ? src.studyPlan : null;
     const studyPlan = {

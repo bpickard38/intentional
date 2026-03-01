@@ -219,6 +219,22 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
     };
   });
 
+  // Fallback: if API sent only scriptures (legacy), derive readingCards so the new UI has content
+  const readingCardsFinal =
+    readingCards.length > 0
+      ? readingCards
+      : scriptures
+          .filter((sc) => sc.ref && sc.url)
+          .map((sc) => ({
+            source: (sc.source ?? "BIBLE") as ScriptureSource,
+            reference: sc.ref,
+            url: sc.officialUrl || sc.url,
+            whyOneLine: (sc.why && sc.why[0]) || sc.summary || sc.ref,
+            keyMoments: sc.keyVersesSummary ? [sc.keyVersesSummary] : sc.background ? [sc.background] : [sc.summary || sc.ref],
+            keyVerses: sc.keyVerses,
+            crossRefs: (sc.crossReferences ?? []).map((cr) => ({ label: cr.ref, url: cr.url })),
+          }));
+
   const deepDive =
     o.deepDive && typeof o.deepDive === "object"
       ? (() => {
@@ -264,7 +280,7 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
     studyDepth,
     planSteps: defaultSteps,
     studyPlan,
-    readingCards,
+    readingCards: readingCardsFinal,
     deepDive,
     scriptures: scriptures.length ? scriptures : [{ ref: "", title: "Scripture", passage: "", background: "", observationQuestions: [], interpretation: [], crossReferences: [], summary: "No scriptures returned.", url: "" }],
     talks,
