@@ -17,6 +17,41 @@ function apiUrl(path: string): string {
   return `${base}${API_PREFIX}/${path}`.replace(/\/+/g, "/");
 }
 
+/** Returns the base URL (no trailing slash). Only use when API_URL is set. */
+export function getApiBaseUrl(): string | null {
+  if (!API_URL) return null;
+  return API_URL;
+}
+
+/** Path prefix in use (e.g. "/api" or ""). */
+export function getApiPathPrefix(): string {
+  return API_PREFIX || "(root)";
+}
+
+/**
+ * Check if the API is reachable (GET the root). Returns the URL we tried and any error.
+ * Use this to verify EXPO_PUBLIC_API_URL and deployment.
+ */
+export async function checkApiReachability(): Promise<{ ok: boolean; url: string; status?: number; error?: string }> {
+  const base = API_URL;
+  if (!base) {
+    return { ok: false, url: "", error: "EXPO_PUBLIC_API_URL is not set" };
+  }
+  // GET the root of the API: with /api prefix we hit base/api, with root we hit base/
+  const healthUrl = API_PREFIX ? `${base}${API_PREFIX}`.replace(/\/+/g, "/") : base;
+  try {
+    const res = await fetch(healthUrl, { method: "GET" });
+    if (res.ok) {
+      return { ok: true, url: healthUrl, status: res.status };
+    }
+    const text = await res.text();
+    return { ok: false, url: healthUrl, status: res.status, error: `HTTP ${res.status}: ${text.slice(0, 60)}` };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, url: healthUrl, error: msg };
+  }
+}
+
 function ensureArray<T>(v: unknown, def: T[]): T[] {
   if (Array.isArray(v)) return v as T[];
   return def;

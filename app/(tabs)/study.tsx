@@ -26,7 +26,7 @@ import { useLocalSearchParams } from "expo-router";
 import type { StudySession, StudyMode, ChatMessage, UserProfile } from "@/src/core/types";
 import { todayKey } from "@/src/core/dates";
 import { getJson } from "@/src/core/storage";
-import { generateStudySession, studyChat } from "@/src/ai/apiClient";
+import { generateStudySession, studyChat, checkApiReachability } from "@/src/ai/apiClient";
 import { fallbackPlanV2, TOPIC_SUGGESTIONS } from "@/src/study/topics";
 import {
   addSession,
@@ -68,6 +68,8 @@ export default function StudyScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [expandedBackground, setExpandedBackground] = useState<Record<number, boolean>>({});
   const [expandedCrossRef, setExpandedCrossRef] = useState<Record<string, boolean>>({});
+  const [apiStatus, setApiStatus] = useState<{ ok: boolean; url: string; error?: string } | null>(null);
+  const [apiCheckLoading, setApiCheckLoading] = useState(false);
 
   const timerPersistRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -102,6 +104,29 @@ export default function StudyScreen() {
       loadProfile().then(setProfile);
     }
   }, [session?.status, loadProfile]);
+
+  const runApiCheck = useCallback(async () => {
+    if (!process.env.EXPO_PUBLIC_API_URL?.trim()) {
+      setApiStatus(null);
+      return;
+    }
+    setApiCheckLoading(true);
+    setApiStatus(null);
+    try {
+      const result = await checkApiReachability();
+      setApiStatus({ ok: result.ok, url: result.url, error: result.error });
+    } finally {
+      setApiCheckLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_API_URL?.trim()) {
+      runApiCheck();
+    } else {
+      setApiStatus(null);
+    }
+  }, [runApiCheck]);
 
   useEffect(() => {
     if (!session?.id || session.status !== "in_progress" || !session.timerState?.isRunning) return;
@@ -461,6 +486,32 @@ export default function StudyScreen() {
           <Text style={styles.envBannerText}>EXPO_PUBLIC_API_URL is not set. Add it to .env and run: npx expo start -c</Text>
         </View>
       )}
+      {process.env.EXPO_PUBLIC_API_URL?.trim() && (
+        <View style={styles.apiStatusBox}>
+          <Text style={styles.apiStatusLabel}>API</Text>
+          {apiCheckLoading ? (
+            <Text style={styles.apiStatusText}>Checking…</Text>
+          ) : apiStatus ? (
+            <>
+              <Text style={styles.apiStatusUrl} numberOfLines={2}>{apiStatus.url || "(no url)"}</Text>
+              {apiStatus.ok ? (
+                <Text style={[styles.apiStatusText, styles.apiStatusOk]}>Reachable</Text>
+              ) : (
+                <>
+                  <Text style={[styles.apiStatusText, styles.apiStatusErr]}>Not reachable</Text>
+                  {apiStatus.error ? <Text style={styles.apiStatusError} numberOfLines={3}>{apiStatus.error}</Text> : null}
+                  <Text style={styles.apiStatusHint}>
+                    If you changed Vercel's repo or Root Directory, use that project's URL. Try EXPO_PUBLIC_API_PATH=root in .env if you get 404.
+                  </Text>
+                </>
+              )}
+              <Pressable onPress={runApiCheck} style={styles.apiCheckBtn} disabled={apiCheckLoading}>
+                <Text style={styles.apiCheckBtnText}>Check again</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+      )}
 
       <Text style={styles.label}>Duration</Text>
       <View style={styles.durationRow}>
@@ -522,6 +573,16 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 16 },
   envBanner: { backgroundColor: "#fff3cd", padding: 10, borderRadius: 8, marginBottom: 12 },
   envBannerText: { fontSize: 12, color: "#856404" },
+  apiStatusBox: { backgroundColor: "#f0f4f8", padding: 12, borderRadius: 8, marginBottom: 12 },
+  apiStatusLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginBottom: 4 },
+  apiStatusUrl: { fontSize: 11, color: "#333", marginBottom: 4 },
+  apiStatusText: { fontSize: 14 },
+  apiStatusOk: { color: "#2b8a3e", fontWeight: "600" },
+  apiStatusErr: { color: "#c00", fontWeight: "600" },
+  apiStatusError: { fontSize: 12, color: "#c00", marginTop: 4 },
+  apiStatusHint: { fontSize: 11, color: "#666", marginTop: 6, fontStyle: "italic" },
+  apiCheckBtn: { marginTop: 8, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#0a7ea4", borderRadius: 8 },
+  apiCheckBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
   errorText: { fontSize: 12, color: "#c00", marginBottom: 8 },
   genBtn: { paddingVertical: 14, borderRadius: 14, alignItems: "center", backgroundColor: "#0a7ea4" },
   genBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
