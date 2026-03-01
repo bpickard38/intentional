@@ -310,7 +310,9 @@ export async function generateStudySession(
     studyDepth: studyDepth ?? "GUIDED",
     requestId: Date.now(),
   });
-  const raw = (data && typeof data === "object" && ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).studyPlan ?? (data as Record<string, unknown>).data)) ?? data;
+  // API returns the full plan at top level (title, scriptures, readingCards, studyPlan, etc.).
+  // Do NOT use data.studyPlan as raw — that's the small { read, lookFor, ponder } object. Use data.plan or data.data only if present (nested wrapper), else the whole response.
+  const raw = (data && typeof data === "object" && ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).data)) ?? data;
   return normalizePlanV2(raw, durationMin, topic, mode);
 }
 
