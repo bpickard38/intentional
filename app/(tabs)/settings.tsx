@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { FaithTradition, UserProfile } from "@/src/core/types";
+import type { FaithTradition, UserProfile, StudyDisplayMode } from "@/src/core/types";
 import { getJson, setJson, removeKey } from "@/src/core/storage";
 
 const PROFILE_KEY = "profile:v1";
@@ -15,6 +15,12 @@ const TRADITIONS: FaithTradition[] = [
   "PreferNotToSay",
 ];
 
+const STUDY_DISPLAY_MODES: { value: StudyDisplayMode; label: string }[] = [
+  { value: "KEY_VERSES", label: "Key Verses" },
+  { value: "FULL_CHAPTER", label: "Full Chapter" },
+  { value: "BOTH", label: "Both" },
+];
+
 export default function SettingsScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
@@ -24,6 +30,7 @@ export default function SettingsScreen() {
       p ?? {
         id: "default",
         faithTradition: "Christian",
+        studyDisplayMode: "BOTH",
         createdAt: new Date().toISOString(),
       }
     );
@@ -37,6 +44,18 @@ export default function SettingsScreen() {
     const next: UserProfile = {
       id: profile?.id ?? "default",
       faithTradition: t,
+      studyDisplayMode: profile?.studyDisplayMode ?? "BOTH",
+      createdAt: profile?.createdAt ?? new Date().toISOString(),
+    };
+    await setJson(PROFILE_KEY, next);
+    setProfile(next);
+  }
+
+  async function setStudyDisplayMode(m: StudyDisplayMode) {
+    const next: UserProfile = {
+      id: profile?.id ?? "default",
+      faithTradition: profile?.faithTradition ?? "Christian",
+      studyDisplayMode: m,
       createdAt: profile?.createdAt ?? new Date().toISOString(),
     };
     await setJson(PROFILE_KEY, next);
@@ -71,6 +90,20 @@ export default function SettingsScreen() {
           >
             <Text style={[styles.optionText, profile.faithTradition === t && styles.optionTextActive]}>
               {t}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.label}>Study mode</Text>
+      <View style={styles.options}>
+        {STUDY_DISPLAY_MODES.map(({ value, label }) => (
+          <Pressable
+            key={value}
+            onPress={() => setStudyDisplayMode(value)}
+            style={[styles.optionBtn, (profile.studyDisplayMode ?? "BOTH") === value && styles.optionBtnActive]}
+          >
+            <Text style={[styles.optionText, (profile.studyDisplayMode ?? "BOTH") === value && styles.optionTextActive]}>
+              {label}
             </Text>
           </Pressable>
         ))}

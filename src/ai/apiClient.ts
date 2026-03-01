@@ -1,5 +1,5 @@
 import type { StudyPlan, StudyPlanV2 } from "@/src/core/types";
-import type { FaithTradition } from "@/src/core/types";
+import type { FaithTradition, ScriptureSource, StudyDisplayMode } from "@/src/core/types";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
 
@@ -118,9 +118,16 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
   });
   const scriptures = ensureArray(o.scriptures, []).map((sc: unknown) => {
     const s = (sc && typeof sc === "object" ? sc : {}) as Record<string, unknown>;
+    const source = ["BOM", "DNC", "PGP", "BIBLE"].includes(s.source as string) ? (s.source as ScriptureSource) : undefined;
     return {
       ref: ensureString(s.ref, ""),
       title: ensureString(s.title, "Scripture"),
+      source,
+      keyVerses: Array.isArray(s.keyVerses) ? (s.keyVerses as string[]).map((v) => String(v)) : undefined,
+      why: Array.isArray(s.why) ? (s.why as string[]).map((w) => String(w)) : undefined,
+      themes: Array.isArray(s.themes) ? (s.themes as string[]).map((t) => String(t)) : undefined,
+      officialUrl: s.officialUrl != null ? ensureString(s.officialUrl, "") : undefined,
+      keyVersesSummary: s.keyVersesSummary != null ? ensureString(s.keyVersesSummary, "") : undefined,
       passage: ensureString(s.passage, ""),
       background: ensureString(s.background, ensureString(s.summary, "")),
       observationQuestions: ensureArray(s.observationQuestions, []).map((q) => ensureString(q, "")),
@@ -144,7 +151,11 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
       title: ensureString(x.title, "Talk"),
       speaker: x.speaker != null ? ensureString(x.speaker, "") : undefined,
       summary: ensureString(x.summary, ""),
+      officialUrl: x.officialUrl != null ? ensureString(x.officialUrl, "") : undefined,
       url: ensureString(x.url, ""),
+      why: Array.isArray(x.why) ? (x.why as string[]).map((w) => String(w)) : undefined,
+      themes: Array.isArray(x.themes) ? (x.themes as string[]).map((t) => String(t)) : undefined,
+      conference: x.conference != null ? ensureString(x.conference, "") : undefined,
     };
   });
   const articles = ensureArray(o.articles, []).map((a: unknown) => {
@@ -153,6 +164,7 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
   });
   const reflectionPrompts = ensureArray(o.reflectionPrompts, []).map((p) => ensureString(p, ""));
   const actionStep = ensureString(o.actionStep, "Reflect and choose one action.");
+  const studySummary = o.studySummary != null ? ensureString(o.studySummary, "") : undefined;
   const totalStepMinutes = planSteps.reduce((sum, st) => sum + st.minutes, 0);
   const defaultSteps =
     totalStepMinutes <= 0
@@ -170,6 +182,7 @@ function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string,
     articles,
     reflectionPrompts: reflectionPrompts.length ? reflectionPrompts : ["What stood out?", "How will you apply this?"],
     actionStep,
+    studySummary,
     optional: o.optional && typeof o.optional === "object" ? (o.optional as StudyPlanV2["optional"]) : undefined,
   };
 }
@@ -178,7 +191,8 @@ export async function generateStudySession(
   durationMin: 15 | 30 | 60,
   topic: string,
   mode: "devotional" | "deep" | "challenge",
-  faithTradition: FaithTradition
+  faithTradition: FaithTradition,
+  studyDisplayMode?: StudyDisplayMode
 ): Promise<StudyPlanV2> {
   const url = apiUrl("generate-study-session");
   const data = await fetchJson<unknown>(url, {
@@ -186,6 +200,7 @@ export async function generateStudySession(
     topic,
     mode,
     faithTradition,
+    studyDisplayMode: studyDisplayMode ?? "BOTH",
     requestId: Date.now(),
   });
   const raw = (data && typeof data === "object" && ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).studyPlan ?? (data as Record<string, unknown>).data)) ?? data;

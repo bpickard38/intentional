@@ -106,10 +106,24 @@ export function fallbackPlanV2(
     mode,
     planSteps,
     scriptures,
-    talks: isLDS ? [{ title: "General Conference", summary: "Search for a talk on: " + topic, url: "https://www.churchofjesuschrist.org/general-conference?lang=eng" }] : [],
+    talks: isLDS
+      ? [
+          {
+            title: "General Conference",
+            summary: "Search for a talk on: " + topic,
+            url: "https://www.churchofjesuschrist.org/general-conference?lang=eng",
+            officialUrl: undefined,
+            speaker: undefined,
+            conference: undefined,
+            why: undefined,
+            themes: undefined,
+          },
+        ]
+      : [],
     articles: [],
     reflectionPrompts,
     actionStep,
+    studySummary: `This plan focuses on "${topic}" with ${scriptures.length} passage${scriptures.length !== 1 ? "s" : ""} for ${durationMin} minutes of ${mode} study.`,
     optional: mode === "devotional" ? { prayerPrompt: "Ask God to make this word real to you today." } : undefined,
   };
 }

@@ -27,6 +27,12 @@ export type StudyPlan = {
   actionStep: string;
 };
 
+/** User preference: Key Verses only, Full Chapter only, or Both. */
+export type StudyDisplayMode = "KEY_VERSES" | "FULL_CHAPTER" | "BOTH";
+
+/** Scripture source for copyright: do not show full text for BOM, DNC, PGP. */
+export type ScriptureSource = "BOM" | "DNC" | "PGP" | "BIBLE";
+
 export type StudyMode = "devotional" | "deep" | "challenge";
 
 export type StudyPlanV2 = {
@@ -38,18 +44,39 @@ export type StudyPlanV2 = {
   scriptures: {
     ref: string;
     title: string;
+    /** When set, use new card UI (reference + why + themes + official link); otherwise legacy. */
+    source?: ScriptureSource;
+    keyVerses?: string[];
+    why?: string[];
+    themes?: string[];
+    /** Official read link; prefer over url for display. */
+    officialUrl?: string;
     passage: string;
     background: string;
+    /** AI summary of key verses (for copyrighted sources; do not show full text). */
+    keyVersesSummary?: string;
     observationQuestions: string[];
     interpretation: string[];
     crossReferences: { ref: string; why: string; url: string; passage?: string }[];
     summary: string;
     url: string;
   }[];
-  talks: { title: string; speaker?: string; summary: string; url: string }[];
+  talks: {
+    title: string;
+    speaker?: string;
+    summary: string;
+    /** Official talk page URL; if missing, show "Link unavailable". */
+    officialUrl?: string;
+    url: string;
+    why?: string[];
+    themes?: string[];
+    conference?: string;
+  }[];
   articles: { title: string; summary: string; url: string }[];
   reflectionPrompts: string[];
   actionStep: string;
+  /** 2–4 sentence recap; no "next step" planning UI. */
+  studySummary?: string;
   optional?: { memoryVerse?: string; prayerPrompt?: string };
 };
 
@@ -94,5 +121,7 @@ export type FaithTradition =
 export type UserProfile = {
   id: string;
   faithTradition: FaithTradition;
+  /** Key Verses | Full Chapter | Both. Default BOTH. */
+  studyDisplayMode?: StudyDisplayMode;
   createdAt: string;
 };

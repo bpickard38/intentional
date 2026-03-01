@@ -26,6 +26,13 @@ In **Settings → Environment Variables**, add:
 |------------------|-------------|----------------|
 | `OPENAI_API_KEY` | Your OpenAI API key | Production, Preview |
 
+Optional (copyright / display):
+
+| Name | Value | Note |
+|------|--------|------|
+| `ALLOW_FULL_BIBLE_TEXT` | `true` or `1` | API: allow full Bible verse text in responses. Omit or `false` = reference + summary + link only. |
+| (App) `EXPO_PUBLIC_ALLOW_FULL_BIBLE_TEXT` | `true` or `1` | App: allow showing full Bible text in UI when API provides it. Set in project `.env`. |
+
 Save and redeploy if the project already exists.
 
 ## 4. Deploy

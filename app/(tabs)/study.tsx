@@ -23,9 +23,10 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
-import type { StudySession, StudyMode, ChatMessage, UserProfile } from "@/src/core/types";
+import type { StudySession, StudyMode, ChatMessage, UserProfile, ScriptureSource, StudyDisplayMode } from "@/src/core/types";
+import { canShowFullText } from "@/src/core/copyright";
 import { todayKey } from "@/src/core/dates";
-import { getJson } from "@/src/core/storage";
+import { getJson, setJson } from "@/src/core/storage";
 import { generateStudySession, studyChat, checkApiReachability } from "@/src/ai/apiClient";
 import { fallbackPlanV2, TOPIC_SUGGESTIONS } from "@/src/study/topics";
 import {
@@ -39,8 +40,10 @@ import {
 } from "@/src/study/sessionService";
 
 const PROFILE_KEY = "profile:v1";
-const DEFAULT_PROFILE: UserProfile = { id: "default", faithTradition: "Christian", createdAt: new Date().toISOString() };
+const DEFAULT_PROFILE: UserProfile = { id: "default", faithTradition: "Christian", studyDisplayMode: "BOTH", createdAt: new Date().toISOString() };
 const TIMER_PERSIST_INTERVAL_MS = 10000;
+
+/** Copyright helper is in @/src/core/copyright (canShowFullText). */
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -68,6 +71,7 @@ export default function StudyScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [expandedBackground, setExpandedBackground] = useState<Record<number, boolean>>({});
   const [expandedCrossRef, setExpandedCrossRef] = useState<Record<string, boolean>>({});
+  const [expandedKeyVerses, setExpandedKeyVerses] = useState<Record<number, boolean>>({});
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; url: string; error?: string } | null>(null);
   const [apiCheckLoading, setApiCheckLoading] = useState(false);
 
@@ -179,7 +183,7 @@ export default function StudyScreen() {
       setProfile(loadedProfile);
       let plan;
       try {
-        plan = await generateStudySession(durationMin, t, mode, loadedProfile.faithTradition);
+        plan = await generateStudySession(durationMin, t, mode, loadedProfile.faithTradition, loadedProfile.studyDisplayMode ?? "BOTH");
       } catch (err) {
         setApiError(err instanceof Error ? err.message : String(err));
         plan = fallbackPlanV2(durationMin, t, mode, loadedProfile.faithTradition);
@@ -321,6 +325,16 @@ export default function StudyScreen() {
   const toggleCrossRef = (key: string) => {
     setExpandedCrossRef((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+  const toggleKeyVerses = (i: number) => {
+    setExpandedKeyVerses((prev) => ({ ...prev, [i]: !prev[i] }));
+  };
+
+  const updateStudyDisplayMode = useCallback(async (m: StudyDisplayMode) => {
+    if (!profile) return;
+    const next = { ...profile, studyDisplayMode: m };
+    await setJson(PROFILE_KEY, next);
+    setProfile(next);
+  }, [profile]);
 
   if (isInSession && plan) {
     return (
@@ -336,13 +350,34 @@ export default function StudyScreen() {
         </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          {plan.title && (
+          {plan.studySummary ? (
+            <View style={styles.studySummary}>
+              <Text style={styles.studySummaryLabel}>Study summary</Text>
+              <Text style={styles.studySummaryText}>{plan.studySummary}</Text>
+            </View>
+          ) : plan.title ? (
             <View style={styles.studySummary}>
               <Text style={styles.studySummaryText}>{plan.title}</Text>
             </View>
-          )}
+          ) : null}
 
           <Text style={styles.sectionTitle}>Ask during study</Text>
+          <View style={styles.studyModeRow}>
+            <Text style={styles.studyModeLabel}>Study mode</Text>
+            <View style={styles.studyModeOptions}>
+              {(["KEY_VERSES", "FULL_CHAPTER", "BOTH"] as const).map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => updateStudyDisplayMode(m)}
+                  style={[styles.studyModeChip, (profile?.studyDisplayMode ?? "BOTH") === m && styles.studyModeChipActive]}
+                >
+                  <Text style={[styles.studyModeChipText, (profile?.studyDisplayMode ?? "BOTH") === m && styles.studyModeChipTextActive]}>
+                    {m === "KEY_VERSES" ? "Key Verses" : m === "FULL_CHAPTER" ? "Full Chapter" : "Both"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
           <ScrollView style={styles.chatThread} nestedScrollEnabled>
             {(session?.chat ?? []).map((m) => (
               <View key={m.id} style={[styles.chatBubble, m.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}>
@@ -366,22 +401,69 @@ export default function StudyScreen() {
           </View>
 
           <Text style={styles.sectionTitle}>Scriptures</Text>
-          {(plan.scriptures ?? []).map((sc, i) => (
+          {(plan.scriptures ?? []).map((sc, i) => {
+            const isNewCard = sc.source != null || (sc.why != null && sc.why.length > 0);
+            const showPassage = canShowFullText(sc.source) && sc.passage;
+            const readUrl = sc.officialUrl || sc.url;
+
+            if (isNewCard) {
+              return (
+                <View key={i} style={styles.card}>
+                  <Text style={styles.cardTitle}>{sc.title}</Text>
+                  <Text style={styles.scriptureRef}>{sc.ref}</Text>
+                  {sc.keyVerses && sc.keyVerses.length > 0 && (
+                    <Text style={styles.cardMeta}>Key verses: {sc.keyVerses.join(", ")}</Text>
+                  )}
+                  {showPassage ? <Text style={styles.scripturePassage}>{sc.passage}</Text> : null}
+                  {sc.why && sc.why.length > 0 && (
+                    <>
+                      <Text style={styles.cardLabel}>Why this applies</Text>
+                      {sc.why.map((w, j) => <Text key={j} style={styles.bullet}>• {w}</Text>)}
+                    </>
+                  )}
+                  {sc.themes && sc.themes.length > 0 && (
+                    <View style={styles.themesRow}>
+                      {sc.themes.map((th, j) => (
+                        <View key={j} style={styles.themeChip}><Text style={styles.themeChipText}>{th}</Text></View>
+                      ))}
+                    </View>
+                  )}
+                  {(sc.keyVersesSummary ?? sc.background) && (
+                    <View style={styles.backgroundSection}>
+                      {sc.keyVersesSummary ? (
+                        <>
+                          <Pressable onPress={() => toggleKeyVerses(i)} accessibilityRole="button" accessibilityState={{ expanded: !!expandedKeyVerses[i] }}>
+                            <Text style={styles.backgroundToggle}>{expandedKeyVerses[i] ? "▼" : "▶"} Key verses summary</Text>
+                          </Pressable>
+                          {expandedKeyVerses[i] && <Text style={styles.cardSummary}>{sc.keyVersesSummary}</Text>}
+                        </>
+                      ) : null}
+                      {sc.background ? (
+                        <>
+                          <Pressable onPress={() => toggleBackground(i)} accessibilityRole="button" accessibilityState={{ expanded: !!expandedBackground[i] }}>
+                            <Text style={styles.backgroundToggle}>{expandedBackground[i] ? "▼" : "▶"} Background info</Text>
+                          </Pressable>
+                          {expandedBackground[i] && <Text style={styles.cardSummary}>{sc.background}</Text>}
+                        </>
+                      ) : null}
+                    </View>
+                  )}
+                  <Pressable onPress={() => readUrl && Linking.openURL(readUrl)} style={styles.linkBtn}>
+                    <Text style={styles.linkBtnText}>Read in Gospel Library / Official site</Text>
+                  </Pressable>
+                </View>
+              );
+            }
+
+            return (
             <View key={i} style={styles.card}>
               <Text style={styles.cardTitle}>{sc.title}</Text>
               <Text style={styles.scriptureRef}>{sc.ref}</Text>
-              {sc.passage ? <Text style={styles.scripturePassage}>{sc.passage}</Text> : null}
+              {showPassage && sc.passage ? <Text style={styles.scripturePassage}>{sc.passage}</Text> : (sc.keyVersesSummary ? <Text style={styles.cardSummary}>{sc.keyVersesSummary}</Text> : null)}
               {sc.background ? (
                 <View style={styles.backgroundSection}>
-                  <Pressable
-                    onPress={() => toggleBackground(i)}
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded: !!expandedBackground[i] }}
-                    accessibilityLabel="Background info"
-                  >
-                    <Text style={styles.backgroundToggle}>
-                      {expandedBackground[i] ? "▼" : "▶"} Background info
-                    </Text>
+                  <Pressable onPress={() => toggleBackground(i)} accessibilityRole="button" accessibilityState={{ expanded: !!expandedBackground[i] }}>
+                    <Text style={styles.backgroundToggle}>{expandedBackground[i] ? "▼" : "▶"} Background info</Text>
                   </Pressable>
                   {expandedBackground[i] && <Text style={styles.cardSummary}>{sc.background}</Text>}
                 </View>
@@ -396,34 +478,26 @@ export default function StudyScreen() {
                 const isExpanded = !!expandedCrossRef[crKey];
                 return (
                   <View key={j} style={styles.crossRefItem}>
-                    <Pressable
-                      onPress={() => toggleCrossRef(crKey)}
-                      accessibilityRole="button"
-                      accessibilityState={{ expanded: isExpanded }}
-                      accessibilityLabel={`Cross reference ${cr.ref}`}
-                    >
+                    <Pressable onPress={() => toggleCrossRef(crKey)} accessibilityRole="button" accessibilityState={{ expanded: isExpanded }}>
                       <Text style={styles.crossRefChip}>{cr.ref} — {cr.why}</Text>
                     </Pressable>
                     {isExpanded && (
                       <View style={styles.crossRefExpand}>
                         <Text style={styles.scriptureRef}>{cr.ref}</Text>
-                        {cr.passage ? (
-                          <Text style={styles.scripturePassage}>{cr.passage}</Text>
-                        ) : (
-                          <Pressable onPress={() => cr.url && Linking.openURL(cr.url)}>
-                            <Text style={styles.linkText}>Open in browser</Text>
-                          </Pressable>
+                        {cr.passage && canShowFullText("BIBLE") ? <Text style={styles.scripturePassage}>{cr.passage}</Text> : (
+                          <Pressable onPress={() => cr.url && Linking.openURL(cr.url)}><Text style={styles.linkText}>Open in browser</Text></Pressable>
                         )}
                       </View>
                     )}
                   </View>
                 );
               })}
-              <Pressable onPress={() => sc.url && Linking.openURL(sc.url)} style={styles.linkBtn}>
+              <Pressable onPress={() => (sc.officialUrl || sc.url) && Linking.openURL(sc.officialUrl || sc.url)} style={styles.linkBtn}>
                 <Text style={styles.linkBtnText}>Open</Text>
               </Pressable>
             </View>
-          ))}
+          );
+          })}
 
           {isLDS && (plan.talks ?? []).length > 0 && (
             <>
@@ -432,10 +506,23 @@ export default function StudyScreen() {
                 <View key={i} style={styles.card}>
                   <Text style={styles.cardTitle}>{t.title}</Text>
                   {t.speaker ? <Text style={styles.cardMeta}>{t.speaker}</Text> : null}
+                  {t.conference ? <Text style={styles.cardMeta}>{t.conference}</Text> : null}
                   <Text style={styles.cardSummary}>{t.summary}</Text>
-                  <Pressable onPress={() => t.url && Linking.openURL(t.url)} style={styles.linkBtn}>
-                    <Text style={styles.linkBtnText}>Open</Text>
-                  </Pressable>
+                  {t.why && t.why.length > 0 && t.why.map((w, j) => <Text key={j} style={styles.bullet}>• {w}</Text>)}
+                  {t.themes && t.themes.length > 0 && (
+                    <View style={styles.themesRow}>
+                      {t.themes.map((th, j) => (
+                        <View key={j} style={styles.themeChip}><Text style={styles.themeChipText}>{th}</Text></View>
+                      ))}
+                    </View>
+                  )}
+                  {t.officialUrl ? (
+                    <Pressable onPress={() => Linking.openURL(t.officialUrl!)} style={styles.linkBtn}>
+                      <Text style={styles.linkBtnText}>Read Full Talk</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.linkUnavailable}>Link unavailable</Text>
+                  )}
                 </View>
               ))}
             </>
@@ -598,7 +685,19 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 20, paddingBottom: 40 },
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 8 },
   studySummary: { marginBottom: 8, paddingVertical: 6 },
+  studySummaryLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginBottom: 4 },
   studySummaryText: { fontSize: 15, color: "#666", fontStyle: "italic" },
+  studyModeRow: { marginBottom: 12 },
+  studyModeLabel: { fontSize: 12, fontWeight: "600", color: "#666", marginBottom: 6 },
+  studyModeOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  studyModeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: "#ddd" },
+  studyModeChipActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
+  studyModeChipText: { fontSize: 14 },
+  studyModeChipTextActive: { fontWeight: "600", color: "#0a7ea4" },
+  themesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
+  themeChip: { backgroundColor: "#eee", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  themeChipText: { fontSize: 12 },
+  linkUnavailable: { fontSize: 14, color: "#999", fontStyle: "italic", marginTop: 6 },
   card: { borderWidth: 1, borderColor: "#eee", borderRadius: 12, padding: 14, marginBottom: 10 },
   scriptureRef: { fontSize: 15, fontWeight: "600", color: "#0a7ea4", marginBottom: 6 },
   scripturePassage: { fontSize: 15, color: "#333", lineHeight: 22, marginBottom: 8 },

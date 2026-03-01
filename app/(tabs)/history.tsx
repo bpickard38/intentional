@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import type { StudySession } from "@/src/core/types";
+import { canShowFullText } from "@/src/core/copyright";
 import { listSessions } from "@/src/study/sessionService";
 
 export default function HistoryScreen() {
@@ -75,16 +76,25 @@ export default function HistoryScreen() {
                       <View key={i} style={styles.expBlock}>
                         <Text style={styles.expItem}>{sc.title}</Text>
                         <Text style={styles.expRef}>{sc.ref}</Text>
-                        {sc.passage ? <Text style={styles.expSub}>{sc.passage}</Text> : null}
+                        {canShowFullText(sc.source) && sc.passage ? <Text style={styles.expSub}>{sc.passage}</Text> : null}
                         {sc.background ? <Text style={styles.expSub}>Background: {sc.background}</Text> : null}
+                        {(sc.why ?? []).length > 0 && sc.why.map((w, j) => <Text key={j} style={styles.expSub}>• {w}</Text>)}
                         {(sc.observationQuestions ?? []).length > 0 && sc.observationQuestions.map((q, j) => <Text key={j} style={styles.expSub}>• {q}</Text>)}
                         {(sc.interpretation ?? []).length > 0 && sc.interpretation.map((x, j) => <Text key={j} style={styles.expSub}>{x}</Text>)}
-                        <Pressable onPress={() => sc.url && Linking.openURL(sc.url)}><Text style={styles.link}>Open</Text></Pressable>
+                        <Pressable onPress={() => (sc.officialUrl || sc.url) && Linking.openURL(sc.officialUrl || sc.url || "")}><Text style={styles.link}>Open</Text></Pressable>
                       </View>
                     ))}
                     <Text style={styles.expTitle}>Talks</Text>
                     {(selected.plan?.talks ?? []).map((t, i) => (
-                      <Text key={i} style={styles.expItem}>{t.title}: {t.summary}</Text>
+                      <View key={i} style={styles.expBlock}>
+                        <Text style={styles.expItem}>{t.title}{t.speaker ? ` — ${t.speaker}` : ""}{t.conference ? ` (${t.conference})` : ""}</Text>
+                        <Text style={styles.expSub}>{t.summary}</Text>
+                        {(t.officialUrl || t.url) ? (
+                          <Pressable onPress={() => (t.officialUrl || t.url) && Linking.openURL(t.officialUrl || t.url || "")}><Text style={styles.link}>Read full talk</Text></Pressable>
+                        ) : (
+                          <Text style={styles.expSub}>Link unavailable</Text>
+                        )}
+                      </View>
                     ))}
                     <Text style={styles.expTitle}>Reflection</Text>
                     {(selected.plan?.reflectionPrompts ?? []).map((p, i) => (
