@@ -69,12 +69,14 @@ export type StudyPlanV2 = {
 
   /**
    * Main reading cards for the session (1–3).
-   * Chapter-based references with key moments and optional key verses + cross refs.
+   * Chapter-based references with per-card big idea and key moments.
    */
   readingCards?: {
     source: ScriptureSource;
     reference: string;
     url: string;
+    /** One-sentence big idea for this scripture (not the overall topic). */
+    bigIdea?: string;
     whyOneLine: string;
     keyMoments: string[];
     keyVerses?: string[];

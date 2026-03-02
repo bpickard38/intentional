@@ -24,7 +24,6 @@ import {
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
 import type { StudySession, StudyMode, ChatMessage, UserProfile, ScriptureSource, StudyDepth } from "@/src/core/types";
-import { canShowFullText } from "@/src/core/copyright";
 import { todayKey } from "@/src/core/dates";
 import { getJson } from "@/src/core/storage";
 import { generateStudySession, studyChat, checkApiReachability } from "@/src/ai/apiClient";
@@ -49,7 +48,7 @@ const DEFAULT_PROFILE: UserProfile = {
 };
 const TIMER_PERSIST_INTERVAL_MS = 10000;
 
-/** Copyright helper is in @/src/core/copyright (canShowFullText). */
+/** Copyright helper: @/src/core/copyright */
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -94,7 +93,6 @@ export default function StudyScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [expandedReadingCards, setExpandedReadingCards] = useState<Record<number, boolean>>({});
   const [deepDiveOpen, setDeepDiveOpen] = useState(false);
-  const [reflectionOpen, setReflectionOpen] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; url: string; error?: string } | null>(null);
   const [apiCheckLoading, setApiCheckLoading] = useState(false);
 
@@ -398,45 +396,7 @@ export default function StudyScreen() {
         </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          {/* SECTION 1 — BIG IDEA */}
-          {(plan.bigIdeaHeadline || plan.title || plan.topic) && (
-            <View style={styles.heroCard}>
-              <Text style={styles.heroHeadline}>{plan.bigIdeaHeadline || plan.title || plan.topic}</Text>
-              {plan.bigIdeaSupport ? <Text style={styles.heroSupport}>{plan.bigIdeaSupport}</Text> : null}
-            </View>
-          )}
-
-          {/* SECTION 2 — MICRO STUDY PLAN */}
-          <View style={styles.microPlanCard}>
-            <View style={styles.microPlanRow}>
-              <Text style={styles.microPlanLabel}>Read</Text>
-              <View style={styles.microPlanValue}>
-                {(plan.studyPlan?.read ?? []).slice(0, 2).map((r, idx) => (
-                  <Pressable
-                    key={`${r.reference}-${idx}`}
-                    onPress={() => r.url && Linking.openURL(r.url)}
-                    style={styles.microPlanLink}
-                  >
-                    <Text style={styles.microPlanLinkText}>{r.reference}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <View style={styles.microPlanRow}>
-              <Text style={styles.microPlanLabel}>Look for</Text>
-              <Text style={styles.microPlanText}>
-                {plan.studyPlan?.lookFor || "Notice what God highlights for you."}
-              </Text>
-            </View>
-            <View style={styles.microPlanRow}>
-              <Text style={styles.microPlanLabel}>Ponder</Text>
-              <Text style={styles.microPlanText}>
-                {plan.studyPlan?.ponder || "What do you feel invited to do in response?"}
-              </Text>
-            </View>
-          </View>
-
-          {/* In-session Q&A helper */}
+          {/* 1) Ask during study — at the very top */}
           <Text style={styles.sectionTitle}>Ask during study</Text>
           <ScrollView style={styles.chatThread} nestedScrollEnabled>
             {(session?.chat ?? []).map((m) => (
@@ -454,23 +414,35 @@ export default function StudyScreen() {
               editable={!chatSending}
               multiline
               scrollEnabled
+              maxLength={2000}
             />
             <Pressable onPress={handleSendChat} style={styles.sendBtn} disabled={chatSending || !chatInput.trim()}>
               <Text style={styles.sendBtnText}>{chatSending ? "…" : "Send"}</Text>
             </Pressable>
           </View>
 
-          {/* SECTION 3 — RECOMMENDED READING CARDS */}
+          {/* 2) Look for — one short focus lens */}
+          <View style={styles.lookForCard}>
+            <Text style={styles.lookForLabel}>Look for</Text>
+            <Text style={styles.lookForText}>
+              {plan.studyPlan?.lookFor || "Notice what God highlights for you."}
+            </Text>
+          </View>
+
+          {/* 3) Recommended reading — scripture cards with per-card Big Idea */}
           <Text style={styles.sectionTitle}>Recommended reading</Text>
           {(plan.readingCards ?? []).slice(0, maxReadingCards).map((card, index) => {
             const isExpanded = !!expandedReadingCards[index];
             const keyMoments = (card.keyMoments ?? []).slice(0, maxKeyMoments);
             const keyVerses = card.keyVerses ?? [];
             const crossRefs = card.crossRefs ?? [];
+            const bigIdea = card.bigIdea || card.whyOneLine;
+            const showWhySeparately = card.bigIdea && card.whyOneLine && card.whyOneLine !== card.bigIdea;
             return (
               <View key={`${card.reference}-${index}`} style={styles.card}>
-                <Text style={styles.cardTitle}>{card.reference}</Text>
-                <Text style={styles.cardSummary}>{card.whyOneLine}</Text>
+                <Text style={styles.scriptureRef}>{card.reference}</Text>
+                <Text style={styles.cardBigIdea}>{bigIdea}</Text>
+                {showWhySeparately ? <Text style={styles.cardSummary}>{card.whyOneLine}</Text> : null}
                 <View style={styles.readingActionsRow}>
                   <Pressable
                     onPress={() => card.url && Linking.openURL(card.url)}
@@ -582,47 +554,22 @@ export default function StudyScreen() {
             </View>
           ) : null}
 
-          {/* SECTION 5 — REFLECTION */}
-          <Text style={styles.sectionTitle}>Reflection</Text>
-          <View style={styles.reflectionCard}>
-            {(plan.reflectionPrompts ?? [])
-              .slice(0, 2)
-              .map((p, i) => (
-                <Text key={i} style={styles.bullet}>
-                  • {p}
-                </Text>
-              ))}
-            <Pressable
-              onPress={() => setReflectionOpen((prev) => !prev)}
-              style={styles.writeThoughtBtn}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: reflectionOpen }}
-            >
-              <Text style={styles.writeThoughtText}>
-                {reflectionOpen ? "Hide thought" : "Write a thought"}
-              </Text>
-            </Pressable>
-            {reflectionOpen && (
-              <View style={styles.reflectionInputContainer}>
-                <TextInput
-                  style={styles.journalInput}
-                  value={journalLearned}
-                  onChangeText={setJournalLearned}
-                  multiline
-                  placeholder="Jot down a brief thought…"
-                />
-                <Pressable
-                  onPress={handleSaveJournal}
-                  style={styles.saveJournalBtn}
-                  disabled={savingJournal}
-                >
-                  <Text style={styles.saveJournalBtnText}>
-                    {savingJournal ? "Saving…" : "Save"}
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
+          {/* 5) Ponder / Journal — at the end, journal always visible */}
+          <Text style={styles.sectionTitle}>Ponder</Text>
+          <Text style={styles.ponderQuestion}>
+            {plan.studyPlan?.ponder || (plan.reflectionPrompts && plan.reflectionPrompts[0]) || "What do you feel invited to do?"}
+          </Text>
+          <Text style={styles.journalLabel}>Journal</Text>
+          <TextInput
+            style={styles.journalInput}
+            value={journalLearned}
+            onChangeText={setJournalLearned}
+            multiline
+            placeholder="Jot down your thoughts…"
+          />
+          <Pressable onPress={handleSaveJournal} style={styles.saveJournalBtn} disabled={savingJournal}>
+            <Text style={styles.saveJournalBtnText}>{savingJournal ? "Saving…" : "Save"}</Text>
+          </Pressable>
 
           <Pressable onPress={handleFinishSession} style={styles.finishBtn}>
             <Text style={styles.finishBtnText}>Finish session</Text>
@@ -766,6 +713,19 @@ const styles = StyleSheet.create({
   linkUnavailable: { fontSize: 14, color: "#999", fontStyle: "italic", marginTop: 6 },
   card: { borderWidth: 1, borderColor: "#eee", borderRadius: 12, padding: 14, marginBottom: 10 },
   scriptureRef: { fontSize: 15, fontWeight: "600", color: "#0a7ea4", marginBottom: 6 },
+  cardBigIdea: { fontSize: 15, fontWeight: "600", color: "#333", marginBottom: 6 },
+  readingActionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  toggleBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: "#ddd" },
+  toggleBtnText: { fontSize: 14, fontWeight: "600" },
+  keyMomentsSection: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#eee" },
+  keyVersesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  crossRefChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  crossRefPill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "#e8f4f8" },
+  crossRefPillText: { fontSize: 13, color: "#0a7ea4", fontWeight: "600" },
+  lookForCard: { backgroundColor: "#f8f9fa", borderRadius: 10, padding: 12, marginTop: 16, marginBottom: 8 },
+  lookForLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginBottom: 4 },
+  lookForText: { fontSize: 15, color: "#333" },
+  ponderQuestion: { fontSize: 15, color: "#333", fontStyle: "italic", marginBottom: 12 },
   scripturePassage: { fontSize: 15, color: "#333", lineHeight: 22, marginBottom: 8 },
   backgroundSection: { marginTop: 4, marginBottom: 4 },
   backgroundToggle: { fontSize: 14, fontWeight: "600", color: "#666", marginBottom: 4 },
@@ -798,4 +758,10 @@ const styles = StyleSheet.create({
 
   finishBtn: { marginTop: 24, paddingVertical: 14, borderRadius: 14, alignItems: "center", backgroundColor: "#2b8a3e" },
   finishBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+
+  deepDiveContainer: { marginTop: 16, borderWidth: 1, borderColor: "#eee", borderRadius: 12, overflow: "hidden" },
+  deepDiveHeader: { padding: 14, backgroundColor: "#f8f9fa" },
+  deepDiveHeaderText: { fontSize: 15, fontWeight: "700" },
+  deepDiveBody: { padding: 14, paddingTop: 0 },
+  talkCard: { marginTop: 12, padding: 12, backgroundColor: "#f8f9fa", borderRadius: 10 },
 });

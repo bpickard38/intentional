@@ -96,17 +96,18 @@ You MUST include a "scriptures" array with at least 1 and preferably 2-3 entries
 - "source": "BIBLE" | "BOM" | "DNC" | "PGP"
 - "reference": string (chapter e.g. "1 Nephi 3", "Matthew 5")
 - "title": string
+- "bigIdea": string (ONE sentence specific to THIS scripture—the main takeaway for this passage, not the overall topic)
 - "why": ["one short reason why this applies"]
 - "keyVersesSummary": string (1-2 sentence summary; no full verse text for BOM/DNC/PGP)
 - "background": string (1 sentence)
 - "keyVerses": ["verse ref only e.g. 1 Nephi 3:7"] (optional)
 - "crossReferences": [{"ref": "Psalm 23:1", "why": "related", "url": "https://www.biblegateway.com/passage/?search=Psalm+23"}] (optional)
-- "officialUrl": string (BibleGateway for Bible; churchofjesuschrist.org for LDS - use https://www.churchofjesuschrist.org/study/scriptures/search?lang=eng&query=REF if unsure)
+- "officialUrl": string (BibleGateway for Bible; churchofjesuschrist.org for LDS)
 
-Also include:
-- "bigIdeaHeadline": string (one sentence, 10-18 words, the main idea for this topic)
-- "bigIdeaSupport": string (optional second sentence)
-- "reflectionPrompts": ["What stood out to you?", "What do you feel invited to do?"]
+Also include at TOP level (once for the whole session):
+- "lookFor": string (one short focus lens sentence, 1-2 lines max, e.g. "Look for moments where faith comes before results.")
+- "ponderQuestion": string (one reflection question for the end, e.g. "What do you feel invited to do?")
+- "reflectionPrompts": ["What stood out to you?", "What do you feel invited to do?"] (optional; can use ponderQuestion as first)
 ${isLDS ? '- "talks": [{"title": string, "speaker": string, "summary": string, "officialUrl": string or empty}] (0-2 talks)' : '- "talks": [] (empty for non-LDS)'}
 
 RULES:
@@ -115,7 +116,7 @@ ${talksRule}
 - COPYRIGHT: Do NOT include full verse/chapter text for BOM, D&C, PGP, or talks. Only references, summaries, and officialUrl.
 - For Bible: ${allowFullBibleText ? "you may include a short passage if helpful." : "no full passage; use keyVersesSummary only."}`;
 
-    const user = `Create a ${durationMin}-minute study session on topic: "${String(topic).trim()}". Return a JSON object with a "scriptures" array containing 1-3 entries (each with source, reference, title, why, keyVersesSummary, background, keyVerses, crossReferences, officialUrl), plus "bigIdeaHeadline", "bigIdeaSupport", and "reflectionPrompts". ${isLDS ? 'Include a "talks" array with 0-2 General Conference talks (title, speaker, summary, officialUrl).' : 'Include "talks": [].'}`;
+    const user = `Create a ${durationMin}-minute study session on topic: "${String(topic).trim()}". Return a JSON object with: (1) "scriptures" array with 1-3 entries—each must have source, reference, title, bigIdea (one sentence for THAT scripture), why, keyVersesSummary, background, keyVerses, crossReferences, officialUrl; (2) top-level "lookFor" (one focus sentence); (3) "ponderQuestion" (one reflection question); (4) "reflectionPrompts". ${isLDS ? 'Include "talks" array with 0-2 General Conference talks.' : 'Include "talks": [].'}`;
 
     const client = new OpenAI({ apiKey });
     const completion = await client.chat.completions.create({
@@ -184,6 +185,7 @@ ${talksRule}
         const whyOneLine = Array.isArray(s?.why) && s.why.length
           ? s.why[0]
           : (s?.summary ?? s?.title ?? ref);
+        const bigIdea = s?.bigIdea != null ? String(s.bigIdea).trim() : (whyOneLine || "");
         const keyMoments = [];
         if (s?.keyVersesSummary) keyMoments.push(String(s.keyVersesSummary));
         if (s?.background) keyMoments.push(String(s.background));
@@ -198,6 +200,7 @@ ${talksRule}
           source: srcType,
           reference: ref,
           url: baseUrl,
+          bigIdea: bigIdea || undefined,
           whyOneLine: String(whyOneLine),
           keyMoments,
           keyVerses: Array.isArray(s?.keyVerses) ? s.keyVerses.map((v) => String(v)) : undefined,
@@ -226,6 +229,7 @@ ${talksRule}
             source: srcType,
             reference,
             url: baseUrl,
+            bigIdea: c?.bigIdea != null ? String(c.bigIdea) : undefined,
             whyOneLine: String(c?.whyOneLine ?? ""),
             keyMoments: Array.isArray(c?.keyMoments) ? c.keyMoments.map((km) => String(km)) : [],
             keyVerses: Array.isArray(c?.keyVerses) ? c.keyVerses.map((kv) => String(kv)) : undefined,
@@ -266,11 +270,11 @@ ${talksRule}
             reference: c.reference,
             url: c.url
           })),
-      lookFor: studyPlanRaw?.lookFor != null ? String(studyPlanRaw.lookFor) : (bigIdeaHeadline || "Notice what God highlights for you."),
+      lookFor: src?.lookFor != null ? String(src.lookFor) : (studyPlanRaw?.lookFor != null ? String(studyPlanRaw.lookFor) : "Notice what God highlights for you."),
       ponder:
-        studyPlanRaw?.ponder != null
-          ? String(studyPlanRaw.ponder)
-          : "What do you feel invited to do in response?"
+        src?.ponderQuestion != null
+          ? String(src.ponderQuestion)
+          : (studyPlanRaw?.ponder != null ? String(studyPlanRaw.ponder) : "What do you feel invited to do in response?")
     };
 
     const deepDiveRaw = src?.deepDive && typeof src.deepDive === "object" ? src.deepDive : null;
