@@ -1,4 +1,4 @@
-import type { StudySession, StudyPlanV2, ChatMessage } from "@/src/core/types";
+import type { StudySession, StudyPlanV2, ChatMessage, ScriptureSource } from "@/src/core/types";
 import { getJson, setJson } from "@/src/core/storage";
 
 const STUDY_SESSIONS_KEY = "studySessions:v1";
@@ -31,15 +31,31 @@ function migrateSession(raw: unknown): StudySession | null {
       planSteps: [{ minutes: durationMin, label: "Study", instruction: "Read and reflect." }],
       scriptures: scriptures.map((sc: unknown) => {
         const x = (sc && typeof sc === "object" ? sc : {}) as Record<string, unknown>;
+        const ref = String(x.ref ?? "");
+        const title = String(x.title ?? "Scripture");
+        const summary = String(x.summary ?? "");
+        const url = String(x.url ?? "");
+        const source =
+          typeof x.source === "string" && ["BOM", "DNC", "PGP", "BIBLE"].includes(x.source)
+            ? (x.source as ScriptureSource)
+            : undefined;
         return {
-          ref: String(x.ref ?? ""),
-          title: String(x.title ?? "Scripture"),
-          background: String(x.summary ?? ""),
+          ref,
+          title,
+          source,
+          keyVerses: Array.isArray(x.keyVerses) ? (x.keyVerses as string[]) : undefined,
+          why: Array.isArray(x.why) ? (x.why as string[]) : undefined,
+          themes: Array.isArray(x.themes) ? (x.themes as string[]) : undefined,
+          officialUrl: typeof x.officialUrl === "string" ? x.officialUrl : undefined,
+          passage: "",
+          background: summary,
+          keyVersesSummary:
+            typeof x.keyVersesSummary === "string" ? x.keyVersesSummary : undefined,
           observationQuestions: [],
           interpretation: [],
           crossReferences: [],
-          summary: String(x.summary ?? ""),
-          url: String(x.url ?? ""),
+          summary,
+          url,
         };
       }),
       talks: Array.isArray(p?.talks) ? (p.talks as StudyPlanV2["talks"]) : [],

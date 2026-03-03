@@ -6,7 +6,8 @@ export default async function handler(req, res) {
     message: "Intentional API",
     endpoints: [
       "POST /api/generate-study-session — body: { durationMin: 15|30|60, topic, mode: devotional|deep|challenge, faithTradition? }",
-      "POST /api/study-chat — body: { topic, mode, faithTradition?, userQuestion, plan (StudyPlanV2), lastMessages? }"
+      "POST /api/study-chat — body: { topic, mode, faithTradition?, userQuestion, plan (StudyPlanV2), lastMessages? }",
+      "POST /api/study/generate — body: { chapters: string[] }"
     ]
   });
 }

@@ -72,18 +72,49 @@ export default function HistoryScreen() {
                       <Text key={i} style={styles.expItem}>• {step.label} ({step.minutes} min): {step.instruction}</Text>
                     ))}
                     <Text style={styles.expTitle}>Scriptures</Text>
-                    {(selected.plan?.scriptures ?? []).map((sc, i) => (
-                      <View key={i} style={styles.expBlock}>
-                        <Text style={styles.expItem}>{sc.title}</Text>
-                        <Text style={styles.expRef}>{sc.ref}</Text>
-                        {canShowFullText(sc.source) && sc.passage ? <Text style={styles.expSub}>{sc.passage}</Text> : null}
-                        {sc.background ? <Text style={styles.expSub}>Background: {sc.background}</Text> : null}
-                        {(sc.why ?? []).length > 0 && sc.why.map((w, j) => <Text key={j} style={styles.expSub}>• {w}</Text>)}
-                        {(sc.observationQuestions ?? []).length > 0 && sc.observationQuestions.map((q, j) => <Text key={j} style={styles.expSub}>• {q}</Text>)}
-                        {(sc.interpretation ?? []).length > 0 && sc.interpretation.map((x, j) => <Text key={j} style={styles.expSub}>{x}</Text>)}
-                        <Pressable onPress={() => (sc.officialUrl || sc.url) && Linking.openURL(sc.officialUrl || sc.url || "")}><Text style={styles.link}>Open</Text></Pressable>
-                      </View>
-                    ))}
+                    {(selected.plan?.scriptures ?? []).map((sc, i) => {
+                      const whyList = sc.why ?? [];
+                      const obsList = sc.observationQuestions ?? [];
+                      const interpList = sc.interpretation ?? [];
+                      return (
+                        <View key={i} style={styles.expBlock}>
+                          <Text style={styles.expItem}>{sc.title}</Text>
+                          <Text style={styles.expRef}>{sc.ref}</Text>
+                          {canShowFullText(sc.source) && sc.passage ? (
+                            <Text style={styles.expSub}>{sc.passage}</Text>
+                          ) : null}
+                          {sc.background ? (
+                            <Text style={styles.expSub}>Background: {sc.background}</Text>
+                          ) : null}
+                          {whyList.length > 0 &&
+                            whyList.map((w, j) => (
+                              <Text key={j} style={styles.expSub}>
+                                • {w}
+                              </Text>
+                            ))}
+                          {obsList.length > 0 &&
+                            obsList.map((q, j) => (
+                              <Text key={j} style={styles.expSub}>
+                                • {q}
+                              </Text>
+                            ))}
+                          {interpList.length > 0 &&
+                            interpList.map((x, j) => (
+                              <Text key={j} style={styles.expSub}>
+                                {x}
+                              </Text>
+                            ))}
+                          <Pressable
+                            onPress={() =>
+                              (sc.officialUrl || sc.url) &&
+                              Linking.openURL(sc.officialUrl || sc.url || "")
+                            }
+                          >
+                            <Text style={styles.link}>Open</Text>
+                          </Pressable>
+                        </View>
+                      );
+                    })}
                     <Text style={styles.expTitle}>Talks</Text>
                     {(selected.plan?.talks ?? []).map((t, i) => (
                       <View key={i} style={styles.expBlock}>

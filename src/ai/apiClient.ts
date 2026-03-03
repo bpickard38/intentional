@@ -1,5 +1,14 @@
-import type { StudyPlan, StudyPlanV2 } from "@/src/core/types";
-import type { FaithTradition, ScriptureSource, StudyDisplayMode, StudyDepth } from "@/src/core/types";
+import type {
+  StudyPlan,
+  StudyPlanV2,
+  FaithTradition,
+  ScriptureSource,
+  StudyDisplayMode,
+  StudyDepth,
+  ChapterStudyResponse,
+  ChapterStudyResult,
+} from "@/src/core/types";
+import { getJson, setJson } from "@/src/core/storage";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
 
@@ -62,10 +71,7 @@ function ensureString(v: unknown, def: string): string {
   return def;
 }
 
-async function fetchJson<T>(
-  url: string,
-  body: unknown
-): Promise<T> {
+async function fetchJson<T>(url: string, body: unknown): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 45000);
   let res: Response;
@@ -104,6 +110,45 @@ async function fetchJson<T>(
   }
 
   return data as T;
+}
+
+function normalizeChapterStudy(raw: unknown, cacheKey: string): ChapterStudyResponse {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const chaptersRaw = ensureArray(o.chapters, []);
+  const chapters: ChapterStudyResult[] = chaptersRaw.map((c: unknown) => {
+    const x = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
+    return {
+      reference: ensureString(x.reference, ""),
+      bigIdea: ensureString(x.bigIdea, ""),
+      crossReferences: ensureArray(x.crossReferences, []).map((cr: unknown) => {
+        const y = (cr && typeof cr === "object" ? cr : {}) as Record<string, unknown>;
+        return {
+          theme: ensureString(y.theme, ""),
+          refs: ensureArray(y.refs, []).map((r) => ensureString(r, "")),
+        };
+      }),
+      discussionQuestions: ensureArray(x.discussionQuestions, []).map((q) =>
+        ensureString(q, "")
+      ),
+      lookFor: ensureArray(x.lookFor, []).map((l) => ensureString(l, "")),
+      context: ensureString(x.context, ""),
+      links: ensureArray(x.links, []).map((ln: unknown) => {
+        const y = (ln && typeof ln === "object" ? ln : {}) as Record<string, unknown>;
+        return {
+          label: ensureString(y.label, ""),
+          url: ensureString(y.url, ""),
+        };
+      }),
+      studyPlanSuggestion:
+        x.studyPlanSuggestion != null ? ensureString(x.studyPlanSuggestion, "") : undefined,
+    };
+  });
+
+  return {
+    chapters,
+    cacheKey,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 function normalizePlanV2(raw: unknown, durationMin: 15 | 30 | 60, topic: string, mode: "devotional" | "deep" | "challenge"): StudyPlanV2 {
@@ -314,8 +359,45 @@ export async function generateStudySession(
   });
   // API returns the full plan at top level (title, scriptures, readingCards, studyPlan, etc.).
   // Do NOT use data.studyPlan as raw — that's the small { read, lookFor, ponder } object. Use data.plan or data.data only if present (nested wrapper), else the whole response.
-  const raw = (data && typeof data === "object" && ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).data)) ?? data;
+  const raw =
+    (data &&
+      typeof data === "object" &&
+      ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).data)) ??
+    data;
   return normalizePlanV2(raw, durationMin, topic, mode);
+}
+
+function normalizeChapterKey(chapters: string[]): string {
+  return chapters
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))
+    .join(" | ");
+}
+
+export async function generateChapterStudy(
+  chapterRefs: string[],
+  opts?: { forceRefresh?: boolean }
+): Promise<{ result: ChapterStudyResponse; fromCache: boolean }> {
+  const normalizedKey = normalizeChapterKey(chapterRefs);
+  const storageKey = `chapterStudyCache:v1:${normalizedKey}`;
+
+  if (!opts?.forceRefresh) {
+    const cached = await getJson<ChapterStudyResponse>(storageKey);
+    if (cached && cached.chapters && cached.chapters.length > 0) {
+      return { result: cached, fromCache: true };
+    }
+  }
+
+  const url = apiUrl("study/generate");
+  const data = await fetchJson<unknown>(url, { chapters: chapterRefs });
+  const raw =
+    data && typeof data === "object" && (data as Record<string, unknown>).chapters
+      ? data
+      : { chapters: data };
+  const normalized = normalizeChapterStudy(raw, normalizedKey);
+  await setJson(storageKey, normalized);
+  return { result: normalized, fromCache: false };
 }
 
 export type StudyChatResponse = {

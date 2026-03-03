@@ -12,7 +12,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -23,14 +22,14 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
-import type { StudySession, StudyMode, ChatMessage, UserProfile, ScriptureSource, StudyDepth } from "@/src/core/types";
+import type { StudySession, StudyMode, ChatMessage, UserProfile, StudyDepth, ChapterStudyResponse } from "@/src/core/types";
 import { todayKey } from "@/src/core/dates";
 import { getJson } from "@/src/core/storage";
-import { generateStudySession, studyChat, checkApiReachability } from "@/src/ai/apiClient";
+import { generateStudySession, studyChat, checkApiReachability, generateChapterStudy } from "@/src/ai/apiClient";
 import { fallbackPlanV2, TOPIC_SUGGESTIONS } from "@/src/study/topics";
+import { ChapterPicker } from "@/src/features/study/ChapterPicker";
 import {
   addSession,
-  updateSession,
   updateSessionJournal,
   appendChatMessage,
   setSessionTimerState,
@@ -82,6 +81,8 @@ export default function StudyScreen() {
   const [mode, setMode] = useState<StudyMode>("devotional");
   const [studyDepth, setStudyDepth] = useState<StudyDepth>("GUIDED");
   const [topic, setTopic] = useState("");
+  const [entryMode, setEntryMode] = useState<"topic" | "chapters">("topic");
+  const [chapterRefs, setChapterRefs] = useState<string[]>([]);
 
   const [journalLearned, setJournalLearned] = useState("");
   const [journalFelt, setJournalFelt] = useState("");
@@ -95,6 +96,8 @@ export default function StudyScreen() {
   const [deepDiveOpen, setDeepDiveOpen] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; url: string; error?: string } | null>(null);
   const [apiCheckLoading, setApiCheckLoading] = useState(false);
+  const [chapterStudy, setChapterStudy] = useState<ChapterStudyResponse | null>(null);
+  const [chapterFromCache, setChapterFromCache] = useState(false);
 
   const timerPersistRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -253,7 +256,7 @@ export default function StudyScreen() {
       setJournalLearned("");
       setJournalFelt("");
       setJournalAction("");
-    } catch (_err) {
+    } catch {
       setApiError("Something went wrong");
       const loadedProfile = await loadProfile();
       setProfile(loadedProfile);
@@ -279,6 +282,22 @@ export default function StudyScreen() {
       };
       await addSession(sess).catch(() => {});
       setSession(sess);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGenerateChapterStudy = async (opts?: { forceRefresh?: boolean }) => {
+    if (chapterRefs.length === 0) return;
+    setLoading(true);
+    setApiError(null);
+    try {
+      const { result, fromCache } = await generateChapterStudy(chapterRefs, opts);
+      setChapterStudy(result);
+      setChapterFromCache(fromCache);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setApiError(msg);
     } finally {
       setLoading(false);
     }
@@ -519,9 +538,9 @@ export default function StudyScreen() {
                       • {b}
                     </Text>
                   ))}
-                  {(plan.deepDive.crossRefs ?? []).length > 0 && (
+                  {(plan.deepDive?.crossRefs ?? []).length > 0 && (
                     <View style={styles.crossRefChipRow}>
-                      {(plan.deepDive.crossRefs ?? []).map((cr) => (
+                      {(plan.deepDive?.crossRefs ?? []).map((cr) => (
                         <Pressable
                           key={cr.label + cr.url}
                           onPress={() => cr.url && Linking.openURL(cr.url)}
@@ -532,23 +551,27 @@ export default function StudyScreen() {
                       ))}
                     </View>
                   )}
-                  {isLDS && plan.deepDive.talk && (
-                    <View style={styles.talkCard}>
-                      <Text style={styles.cardTitle}>{plan.deepDive.talk.title}</Text>
-                      <Text style={styles.cardMeta}>{plan.deepDive.talk.speaker}</Text>
-                      <Text style={styles.cardSummary}>{plan.deepDive.talk.whyOneLine}</Text>
-                      {plan.deepDive.talk.officialUrl ? (
-                        <Pressable
-                          onPress={() => Linking.openURL(plan.deepDive.talk!.officialUrl)}
-                          style={styles.linkBtn}
-                        >
-                          <Text style={styles.linkBtnText}>Read full talk</Text>
-                        </Pressable>
-                      ) : (
-                        <Text style={styles.linkUnavailable}>Link unavailable</Text>
-                      )}
-                    </View>
-                  )}
+                  {isLDS && plan.deepDive?.talk && (() => {
+                    const talk = plan.deepDive?.talk;
+                    if (!talk) return null;
+                    return (
+                      <View style={styles.talkCard}>
+                        <Text style={styles.cardTitle}>{talk.title}</Text>
+                        <Text style={styles.cardMeta}>{talk.speaker}</Text>
+                        <Text style={styles.cardSummary}>{talk.whyOneLine}</Text>
+                        {talk.officialUrl ? (
+                          <Pressable
+                            onPress={() => Linking.openURL(talk.officialUrl)}
+                            style={styles.linkBtn}
+                          >
+                            <Text style={styles.linkBtnText}>Read full talk</Text>
+                          </Pressable>
+                        ) : (
+                          <Text style={styles.linkUnavailable}>Link unavailable</Text>
+                        )}
+                      </View>
+                    );
+                  })()}
                 </View>
               )}
             </View>
@@ -602,7 +625,7 @@ export default function StudyScreen() {
                   <Text style={[styles.apiStatusText, styles.apiStatusErr]}>Not reachable</Text>
                   {apiStatus.error ? <Text style={styles.apiStatusError} numberOfLines={3}>{apiStatus.error}</Text> : null}
                   <Text style={styles.apiStatusHint}>
-                    If you changed Vercel's repo or Root Directory, use that project's URL. Try EXPO_PUBLIC_API_PATH=root in .env if you get 404.
+                    If you changed Vercel\u2019s repo or Root Directory, use that project\u2019s URL. Try EXPO_PUBLIC_API_PATH=root in .env if you get 404.
                   </Text>
                 </>
               )}
@@ -613,6 +636,39 @@ export default function StudyScreen() {
           ) : null}
         </View>
       )}
+
+      <Text style={styles.label}>Study type</Text>
+      <View style={styles.modeRow}>
+        <Pressable
+          onPress={() => setEntryMode("topic")}
+          style={[styles.modeBtn, entryMode === "topic" && styles.modeBtnActive]}
+        >
+          <Text
+            style={[
+              styles.modeBtnText,
+              entryMode === "topic" && styles.modeBtnTextActive,
+            ]}
+          >
+            Topic session
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setEntryMode("chapters")}
+          style={[
+            styles.modeBtn,
+            entryMode === "chapters" && styles.modeBtnActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.modeBtnText,
+              entryMode === "chapters" && styles.modeBtnTextActive,
+            ]}
+          >
+            Chapter study
+          </Text>
+        </Pressable>
+      </View>
 
       <Text style={styles.label}>Duration</Text>
       <View style={styles.durationRow}>
@@ -634,28 +690,158 @@ export default function StudyScreen() {
             }}
             style={[styles.modeBtn, studyDepth === opt.value && styles.modeBtnActive]}
           >
-            <Text style={[styles.modeBtnText, studyDepth === opt.value && styles.modeBtnTextActive]}>
+            <Text
+              style={[
+                styles.modeBtnText,
+                studyDepth === opt.value && styles.modeBtnTextActive,
+              ]}
+            >
               {opt.label}
             </Text>
           </Pressable>
         ))}
       </View>
 
-      <Text style={styles.label}>Topic</Text>
-      <View style={styles.topicChips}>
-        {TOPIC_SUGGESTIONS.map((s) => (
-          <Pressable key={s} onPress={() => setTopic(s)} style={[styles.chip, topic === s && styles.chipActive]}>
-            <Text style={[styles.chipText, topic === s && styles.chipTextActive]}>{s}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <TextInput style={styles.input} placeholder="Or type custom topic" value={topic} onChangeText={setTopic} />
+      {entryMode === "topic" ? (
+        <>
+          <Text style={styles.label}>Topic</Text>
+          <View style={styles.topicChips}>
+            {TOPIC_SUGGESTIONS.map((s) => (
+              <Pressable
+                key={s}
+                onPress={() => setTopic(s)}
+                style={[styles.chip, topic === s && styles.chipActive]}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    topic === s && styles.chipTextActive,
+                  ]}
+                >
+                  {s}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="Or type custom topic"
+            value={topic}
+            onChangeText={setTopic}
+          />
+        </>
+      ) : (
+        <>
+          <ChapterPicker
+            selected={chapterRefs}
+            onChangeSelected={setChapterRefs}
+            onGenerate={() => handleGenerateChapterStudy()}
+            generating={loading}
+          />
+          {chapterStudy && (
+            <>
+              <Text style={styles.sectionTitle}>Study helps</Text>
+              {chapterFromCache && (
+                <Text style={styles.helperText}>
+                  Showing your last result for this chapter set. Tap Regenerate for a fresh set of prompts.
+                </Text>
+              )}
+              {chapterStudy.chapters.map((ch) => (
+                <View key={ch.reference} style={styles.card}>
+                  <Text style={styles.scriptureRef}>{ch.reference}</Text>
+                  <Text style={styles.cardBigIdea}>{ch.bigIdea}</Text>
+                  {ch.context ? (
+                    <Text style={styles.cardSummary}>{ch.context}</Text>
+                  ) : null}
+
+                  {ch.lookFor && ch.lookFor.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={styles.cardLabel}>Look for</Text>
+                      {ch.lookFor.map((lf, idx) => (
+                        <Text key={idx} style={styles.bullet}>
+                          • {lf}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+
+                  {ch.discussionQuestions && ch.discussionQuestions.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={styles.cardLabel}>Discuss</Text>
+                      {ch.discussionQuestions.map((q, idx) => (
+                        <Text key={idx} style={styles.bullet}>
+                          • {q}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+
+                  {ch.crossReferences && ch.crossReferences.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={styles.cardLabel}>Cross references</Text>
+                      <View style={styles.crossRefChipRow}>
+                        {ch.crossReferences.flatMap((group) =>
+                          group.refs.map((ref) => (
+                            <View key={group.theme + ref} style={styles.themeChip}>
+                              <Text style={styles.themeChipText}>
+                                {group.theme ? `${group.theme}: ${ref}` : ref}
+                              </Text>
+                            </View>
+                          ))
+                        )}
+                      </View>
+                    </View>
+                  )}
+
+                  {ch.links && ch.links.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={styles.cardLabel}>Open</Text>
+                      <View style={styles.readingActionsRow}>
+                        {ch.links.map((ln) => (
+                          <Pressable
+                            key={ln.label + ln.url}
+                            onPress={() => ln.url && Linking.openURL(ln.url)}
+                            style={styles.linkBtn}
+                          >
+                            <Text style={styles.linkBtnText}>{ln.label || "Open"}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {ch.studyPlanSuggestion ? (
+                    <Text style={[styles.cardSummary, { marginTop: 8 }]}>
+                      {ch.studyPlanSuggestion}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+              {chapterStudy.chapters.length > 0 && (
+                <Pressable
+                  onPress={() => handleGenerateChapterStudy({ forceRefresh: true })}
+                  style={[styles.genBtn, { marginTop: 8 }]}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.genBtnText}>Regenerate</Text>
+                  )}
+                </Pressable>
+              )}
+            </>
+          )}
+        </>
+      )}
 
       {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
 
-      <Pressable onPress={handleStartSession} style={styles.genBtn} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.genBtnText}>Start session</Text>}
-      </Pressable>
+      {entryMode === "topic" && (
+        <Pressable onPress={handleStartSession} style={styles.genBtn} disabled={loading}>
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.genBtnText}>Start session</Text>}
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -696,6 +882,7 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 12, color: "#c00", marginBottom: 8 },
   genBtn: { paddingVertical: 14, borderRadius: 14, alignItems: "center", backgroundColor: "#0a7ea4" },
   genBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  helperText: { fontSize: 12, color: "#555", marginBottom: 8 },
 
   timerHeader: { padding: 12, backgroundColor: "#f0f4f8", borderBottomWidth: 1, borderBottomColor: "#ddd" },
   timerText: { fontSize: 28, fontWeight: "800" },

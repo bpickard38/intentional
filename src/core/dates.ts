@@ -1,6 +1,15 @@
+export function toLocalDateKey(date: Date): string {
+  return (
+    date.getFullYear() +
+    "-" +
+    pad(date.getMonth() + 1) +
+    "-" +
+    pad(date.getDate())
+  );
+}
+
 export function todayKey(): string {
-  const d = new Date();
-  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  return toLocalDateKey(new Date());
 }
 
 function pad(n: number): string {

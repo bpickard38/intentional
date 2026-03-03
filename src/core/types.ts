@@ -1,13 +1,30 @@
 export type HabitSchedule =
   | { type: "daily" }
-  | { type: "weekly"; targetPerWeek: number };
+  | {
+      type: "weekly";
+      /**
+       * Optional target completions per week (existing behavior).
+       * When omitted, streak logic still works based on scheduled days.
+       */
+      targetPerWeek?: number;
+      /**
+       * Optional days of week this habit is scheduled for (0 = Sunday ... 6 = Saturday).
+       * When omitted, treat all days in the week as candidates for completion.
+       */
+      daysOfWeek?: number[];
+    };
 
 export type Habit = {
   id: string;
+  /** Legacy name field used throughout Today screen. */
   name: string;
+  /** Optional display title; fall back to `name` when not set. */
+  title?: string;
   schedule: HabitSchedule;
   reminderTime?: string;
   createdAt: string;
+  /** Soft-delete / hide from normal lists without losing history. */
+  archived?: boolean;
 };
 
 export type HabitLog = {
@@ -143,6 +160,23 @@ export type StudyPlanV2 = {
   /** Optional recap; new UI focuses on Big Idea hero + micro plan instead. */
   studySummary?: string;
   optional?: { memoryVerse?: string; prayerPrompt?: string };
+};
+
+export type ChapterStudyResult = {
+  reference: string;
+  bigIdea: string;
+  crossReferences: { theme: string; refs: string[] }[];
+  discussionQuestions: string[];
+  lookFor: string[];
+  context: string;
+  links: { label: string; url: string }[];
+  studyPlanSuggestion?: string;
+};
+
+export type ChapterStudyResponse = {
+  chapters: ChapterStudyResult[];
+  cacheKey?: string;
+  generatedAt: string;
 };
 
 export type ChatMessage = {

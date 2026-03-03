@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -19,6 +19,7 @@ import {
   getTodayProgress,
   getWeeklyProgress,
   getAllLogs,
+  deleteHabit,
 } from "@/src/habits/habitService";
 
 export default function TodayScreen() {
@@ -30,6 +31,7 @@ export default function TodayScreen() {
   const [newName, setNewName] = useState("");
   const [scheduleType, setScheduleType] = useState<"daily" | "weekly">("daily");
   const [targetPerWeek, setTargetPerWeek] = useState("3");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [h, l, logs] = await Promise.all([
@@ -107,7 +109,7 @@ export default function TodayScreen() {
       )}
 
       <FlatList
-        data={[...dailyHabits, ...weeklyHabits]}
+        data={[...dailyHabits, ...weeklyHabits].filter((h) => !h.archived)}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => {
@@ -117,7 +119,7 @@ export default function TodayScreen() {
             ? getWeeklyCountForHabit(item.id)
             : 0;
           const weeklyTarget = !isDaily && item.schedule.type === "weekly"
-            ? item.schedule.targetPerWeek
+            ? item.schedule.targetPerWeek ?? 0
             : 0;
           return (
             <Pressable
@@ -128,14 +130,22 @@ export default function TodayScreen() {
                 {isDone ? <Text style={styles.check}>✓</Text> : null}
               </View>
               <View style={styles.habitLabelRow}>
-                <Text style={[styles.itemText, isDone && styles.itemTextDone]}>
-                  {item.name}
-                </Text>
-                {!isDaily && weeklyTarget > 0 ? (
-                  <Text style={styles.weeklyBadge}>
-                    {weeklyCount}/{weeklyTarget} this week
+                <View style={styles.habitLabelMain}>
+                  <Text style={[styles.itemText, isDone && styles.itemTextDone]}>
+                    {item.title ?? item.name}
                   </Text>
-                ) : null}
+                  {!isDaily && weeklyTarget > 0 ? (
+                    <Text style={styles.weeklyBadge}>
+                      {weeklyCount}/{weeklyTarget} this week
+                    </Text>
+                  ) : null}
+                </View>
+                <Pressable
+                  onPress={() => setDeleteId(item.id)}
+                  style={styles.deleteBtn}
+                >
+                  <Text style={styles.deleteBtnText}>Delete</Text>
+                </Pressable>
               </View>
             </Pressable>
           );
@@ -207,6 +217,38 @@ export default function TodayScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={deleteId != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteId(null)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setDeleteId(null)}>
+          <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Delete habit?</Text>
+            <Text style={styles.deleteWarningText}>
+              This will remove its streak history for all days.
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setDeleteId(null)} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={async () => {
+                  if (!deleteId) return;
+                  await deleteHabit(deleteId);
+                  setDeleteId(null);
+                  load();
+                }}
+                style={styles.deleteConfirmBtn}
+              >
+                <Text style={styles.deleteConfirmText}>Delete</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -242,8 +284,19 @@ const styles = StyleSheet.create({
   check: { fontSize: 16, fontWeight: "900" },
   itemText: { fontSize: 16, fontWeight: "600" },
   itemTextDone: { textDecorationLine: "line-through", opacity: 0.6 },
-  habitLabelRow: { flex: 1 },
+  habitLabelRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  habitLabelMain: { flexShrink: 1 },
   weeklyBadge: { fontSize: 12, color: "#666", marginTop: 2 },
+  deleteBtn: {
+    marginLeft: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#f5c2c7",
+    backgroundColor: "#fff5f5",
+  },
+  deleteBtnText: { fontSize: 12, fontWeight: "600", color: "#b02a37" },
   addBtn: {
     paddingVertical: 10,
     marginBottom: 8,
@@ -268,6 +321,7 @@ const styles = StyleSheet.create({
   },
   modalBox: { backgroundColor: "#fff", borderRadius: 16, padding: 20 },
   modalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 12 },
+  deleteWarningText: { fontSize: 14, color: "#444", marginBottom: 16 },
   input: {
     borderWidth: 1,
     borderColor: "#ddd",
@@ -291,4 +345,11 @@ const styles = StyleSheet.create({
   cancelBtnText: { fontSize: 16, fontWeight: "600" },
   saveBtn: { paddingVertical: 10, paddingHorizontal: 20, backgroundColor: "#0a7ea4", borderRadius: 10 },
   saveBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  deleteConfirmBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: "#b02a37",
+    borderRadius: 10,
+  },
+  deleteConfirmText: { fontSize: 16, fontWeight: "700", color: "#fff" },
 });

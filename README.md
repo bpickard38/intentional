@@ -77,7 +77,27 @@ Join our community of developers creating universal apps.
 ## Study Session + Chat
 
 - **Study modes:** Devotional, Deep Study, and Challenge. Each mode changes the plan structure and reflection prompts.
-- **Guided session:** After choosing duration, mode, and topic and tapping "Start session", you get a time-boxed plan with steps, scriptures (with background, observation questions, interpretation, cross-references), talks/articles, reflection prompts, and an action step. A countdown timer runs on-device; you can Pause/Resume and advance steps manually.
+- **Guided session:** After choosing duration, mode, and topic and tapping "Start session", you get a time-boxed plan with steps, scriptures (shown as chapter-based cards with key moments), optional talks, and a simple reflection section. A countdown timer runs on-device; you can Pause/Resume and advance steps manually.
 - **Ask during study:** The in-session chat sends your question to the backend `/api/study-chat` with the current plan, mode, topic, and last messages. Responses are short and mentor-style. If the API fails, a friendly error bubble is shown.
 - **Persistence:** Sessions, habit logs, and chat transcripts are stored locally with AsyncStorage. History lists all sessions (newest first) with mode and status; tap to see full detail and chat transcript. "Resume" appears for in-progress sessions and opens the Study tab with that session.
-- **Env and restart:** Set `EXPO_PUBLIC_API_URL` in `.env` (no trailing slash). After changing `.env`, clear cache and restart: `npx expo start -c`. computer’s LAN IP (e.g. `http://192.168.1.x:3000`).
+- **Env and restart:** Set `EXPO_PUBLIC_API_URL` in `.env` (no trailing slash). After changing `.env`, clear cache and restart: `npx expo start -c`. Use your computer’s LAN IP (e.g. `http://192.168.1.x:3000`) when testing on a device.
+
+## Habits & Streaks
+
+- **Today tab:** Shows your daily and weekly habits, with per-day and per-week progress. Habits are stored locally in AsyncStorage.
+- **Streaks tab:** Summarizes total habits, how many are currently in a streak, and the longest current streak. Below the summary, a list shows each habit’s current and best streak, plus the last day it was completed.
+- **Habit details:** Tapping a habit in the Streaks list opens a detail screen with a 30‑day grid (completed / missed / not scheduled), current/best streak stats, and Edit/Delete actions. Deleting a habit also removes its completion history from the streak calculations.
+
+## Chapter Study API
+
+- **Frontend client:** The Study tab includes a “Chapter study” mode with a chapter picker (Standard Works → book → chapter chips). When you tap **Generate Study Helps**, the app calls `generateChapterStudy` from `src/ai/apiClient.ts`, which:
+  - POSTs to `POST /api/study/generate` with `{ chapters: string[] }`.
+  - Caches results in AsyncStorage under keys like `chapterStudyCache:v1:<sorted chapter list>`.
+  - Returns `{ result, fromCache }` so the UI can show cached results instantly and offer a **Regenerate** button.
+- **Backend route:** `api/study/generate.js` uses `OPENAI_API_KEY` to call OpenAI and returns:
+  - For each chapter: `reference`, `bigIdea`, `crossReferences[{ theme, refs[] }]`, `discussionQuestions[]`, `lookFor[]`, `context`, and `links[{ label, url }]`, plus an optional `studyPlanSuggestion`.
+  - The route is **copyright safe**: it never returns full scripture or talk text, only references, summaries, prompts, and official links (e.g. `churchofjesuschrist.org`).
+- **Usage:** Set `EXPO_PUBLIC_API_URL` to your deployed API base (for example, your Vercel URL). The app will hit:
+  - `POST <API_URL>/api/generate-study-session`
+  - `POST <API_URL>/api/study-chat`
+  - `POST <API_URL>/api/study/generate`
