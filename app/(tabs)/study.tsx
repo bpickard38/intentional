@@ -21,13 +21,15 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
+import type { ScrollView as RNScrollView } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import type { StudySession, StudyMode, ChatMessage, UserProfile, StudyDepth, ChapterStudyResponse } from "@/src/core/types";
 import { todayKey } from "@/src/core/dates";
 import { getJson } from "@/src/core/storage";
 import { generateStudySession, studyChat, checkApiReachability, generateChapterStudy } from "@/src/ai/apiClient";
 import { fallbackPlanV2, TOPIC_SUGGESTIONS } from "@/src/study/topics";
 import { ChapterPicker } from "@/src/features/study/ChapterPicker";
+import { listJournals, setJournal, listPins, setPinnedLookFor } from "@/src/study/journalStorage";
 import {
   addSession,
   updateSessionJournal,
@@ -55,6 +57,57 @@ function formatTime(sec: number): string {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
+function formatSavedAt(isoString: string): string {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function StudyCardSkeleton() {
+  return (
+    <View style={skeletonStyles.card}>
+      <View style={skeletonStyles.refLine} />
+      <View style={skeletonStyles.bigLine} />
+      <View style={skeletonStyles.line} />
+      <View style={skeletonStyles.line} />
+      <View style={[skeletonStyles.line, { width: "70%" }]} />
+    </View>
+  );
+}
+
+const skeletonStyles = StyleSheet.create({
+  card: {
+    borderWidth: 1,
+    borderColor: "#eee",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    backgroundColor: "#fafafa",
+  },
+  refLine: {
+    height: 14,
+    width: 100,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  bigLine: {
+    height: 16,
+    width: "100%",
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  line: {
+    height: 12,
+    width: "100%",
+    backgroundColor: "#e8e8e8",
+    borderRadius: 4,
+    marginBottom: 6,
+  },
+});
+
 const DEPTH_OPTIONS: { value: StudyDepth; label: string; mode: StudyMode }[] = [
   { value: "QUICK", label: "Quick", mode: "devotional" },
   { value: "GUIDED", label: "Guided", mode: "deep" },
@@ -72,7 +125,8 @@ function depthFromMode(mode: StudyMode): StudyDepth {
 }
 
 export default function StudyScreen() {
-  const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
+  const { sessionId, journalRef, planRefs } = useLocalSearchParams<{ sessionId?: string; journalRef?: string; planRefs?: string }>();
+  const router = useRouter();
   const [session, setSession] = useState<StudySession | null>(null);
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -104,10 +158,137 @@ export default function StudyScreen() {
   const sessionRef = useRef<StudySession | null>(session);
   sessionRef.current = session;
 
+  const [chapterJournalDrafts, setChapterJournalDrafts] = useState<Record<string, string>>({});
+  const [chapterJournalSavedAt, setChapterJournalSavedAt] = useState<Record<string, string>>({});
+  const [chapterJournalSaving, setChapterJournalSaving] = useState<Record<string, boolean>>({});
+  const journalSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [pinnedLookForMap, setPinnedLookForMap] = useState<Record<string, string[]>>({});
+  const scrollRef = useRef<RNScrollView | null>(null);
+  const chapterCardOffsetsRef = useRef<Record<string, number>>({});
+  const [initialJournalRef, setInitialJournalRef] = useState<string | null>(null);
+  const generateAbortRef = useRef<AbortController | null>(null);
+
   const loadProfile = useCallback(async (): Promise<UserProfile> => {
     const p = await getJson<UserProfile>(PROFILE_KEY);
     return p ?? DEFAULT_PROFILE;
   }, []);
+
+  // Seed chapter journal drafts and pinned prompts when chapter results load.
+  useEffect(() => {
+    if (!chapterStudy || !chapterStudy.chapters.length) return;
+    (async () => {
+      try {
+        const [journals, pins] = await Promise.all([listJournals(), listPins()]);
+        const drafts: Record<string, string> = {};
+        const savedAt: Record<string, string> = {};
+        journals.forEach((entry) => {
+          drafts[entry.reference] = entry.text ?? "";
+          savedAt[entry.reference] = entry.updatedAt ?? "";
+        });
+        setChapterJournalDrafts(drafts);
+        setChapterJournalSavedAt(savedAt);
+        setPinnedLookForMap(pins);
+      } catch {
+        // Journaling must never block the main Study UI.
+      }
+    })();
+  }, [chapterStudy, chapterStudy?.cacheKey, chapterStudy?.generatedAt]);
+
+  const scheduleJournalSave = useCallback((reference: string, text: string) => {
+    const refKey = reference.trim();
+    if (!refKey) return;
+    setChapterJournalDrafts((prev) => ({ ...prev, [refKey]: text }));
+    setChapterJournalSaving((prev) => ({ ...prev, [refKey]: true }));
+    const timers = journalSaveTimersRef.current;
+    if (timers[refKey]) {
+      clearTimeout(timers[refKey]);
+    }
+    timers[refKey] = setTimeout(async () => {
+      try {
+        await setJournal(refKey, text);
+        const now = new Date().toISOString();
+        setChapterJournalSavedAt((prev) => ({ ...prev, [refKey]: now }));
+      } finally {
+        setChapterJournalSaving((prev) => ({ ...prev, [refKey]: false }));
+      }
+    }, 800);
+  }, []);
+
+  const flushJournalSave = useCallback(
+    async (reference: string) => {
+      const refKey = reference.trim();
+      if (!refKey) return;
+      const timers = journalSaveTimersRef.current;
+      if (timers[refKey]) {
+        clearTimeout(timers[refKey]);
+        delete timers[refKey];
+      }
+      const text = chapterJournalDrafts[refKey] ?? "";
+      if (!text && !chapterJournalSavedAt[refKey]) {
+        return;
+      }
+      setChapterJournalSaving((prev) => ({ ...prev, [refKey]: true }));
+      try {
+        await setJournal(refKey, text);
+        const now = new Date().toISOString();
+        setChapterJournalSavedAt((prev) => ({ ...prev, [refKey]: now }));
+      } finally {
+        setChapterJournalSaving((prev) => ({ ...prev, [refKey]: false }));
+      }
+    },
+    [chapterJournalDrafts, chapterJournalSavedAt]
+  );
+
+  // Flush any in-flight journal saves when leaving the Study screen.
+  useEffect(
+    () => () => {
+      const refs = Object.keys(journalSaveTimersRef.current);
+      refs.forEach((ref) => {
+        void flushJournalSave(ref);
+      });
+    },
+    [flushJournalSave]
+  );
+
+  // Cancel in-flight chapter study request when leaving the screen.
+  useEffect(
+    () => () => {
+      if (generateAbortRef.current) {
+        generateAbortRef.current.abort();
+        generateAbortRef.current = null;
+      }
+    },
+    []
+  );
+
+  const togglePin = useCallback(
+    (reference: string, prompt: string) => {
+      const refKey = reference.trim();
+      const promptText = prompt.trim();
+      if (!refKey || !promptText) return;
+      setPinnedLookForMap((prev) => {
+        const existing = prev[refKey] ?? [];
+        const isPinned = existing.includes(promptText);
+        let nextForRef: string[];
+        if (isPinned) {
+          nextForRef = existing.filter((p) => p !== promptText);
+        } else {
+          if (existing.length >= 3) {
+            nextForRef = existing;
+          } else {
+            nextForRef = [...existing, promptText];
+          }
+        }
+        const { [refKey]: _ignored, ...rest } = prev;
+        const nextMap =
+          nextForRef.length === 0 ? rest : { ...rest, [refKey]: nextForRef };
+        // Persist pins asynchronously; ignore errors so UI stays responsive.
+        void setPinnedLookFor(refKey, nextForRef);
+        return nextMap;
+      });
+    },
+    []
+  );
 
   // Seed defaults from profile when not already in a running session.
   useEffect(() => {
@@ -138,6 +319,25 @@ export default function StudyScreen() {
   useEffect(() => {
     loadResumedSession();
   }, [loadResumedSession]);
+
+  // If a journalRef is provided (from the My Journal screen), focus chapter study on that reference
+  // and ensure we generate or load study helps for it.
+  useEffect(() => {
+    if (journalRef) {
+      setEntryMode("chapters");
+      setChapterRefs((prev) => (prev.includes(journalRef) ? prev : [journalRef, ...prev]));
+      setInitialJournalRef(journalRef);
+      return;
+    }
+    if (planRefs && typeof planRefs === "string") {
+      const refs = planRefs.split(",").map((r) => r.trim()).filter(Boolean);
+      if (refs.length > 0) {
+        setEntryMode("chapters");
+        setChapterRefs(refs);
+        setInitialJournalRef(refs[0]);
+      }
+    }
+  }, [journalRef, planRefs]);
 
   useEffect(() => {
     if (session?.status === "in_progress") {
@@ -287,21 +487,53 @@ export default function StudyScreen() {
     }
   };
 
-  const handleGenerateChapterStudy = async (opts?: { forceRefresh?: boolean }) => {
-    if (chapterRefs.length === 0) return;
-    setLoading(true);
-    setApiError(null);
-    try {
-      const { result, fromCache } = await generateChapterStudy(chapterRefs, opts);
-      setChapterStudy(result);
-      setChapterFromCache(fromCache);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setApiError(msg);
-    } finally {
-      setLoading(false);
+  const handleGenerateChapterStudy = useCallback(
+    async (opts?: { forceRefresh?: boolean }) => {
+      if (chapterRefs.length === 0 || loading) return;
+      const controller = new AbortController();
+      generateAbortRef.current = controller;
+      setLoading(true);
+      setApiError(null);
+      try {
+        const { result, fromCache } = await generateChapterStudy(chapterRefs, {
+          ...opts,
+          studyDepth,
+          signal: controller.signal,
+        });
+        if (generateAbortRef.current === controller) {
+          generateAbortRef.current = null;
+        }
+        setChapterStudy(result);
+        setChapterFromCache(fromCache);
+      } catch (err) {
+        if (generateAbortRef.current === controller) {
+          generateAbortRef.current = null;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("abort") || msg.includes("Aborted")) {
+          return;
+        }
+        setApiError(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [chapterRefs, loading, studyDepth]
+  );
+
+  useEffect(() => {
+    if (!initialJournalRef) return;
+    if (!chapterStudy || !chapterStudy.chapters.length) {
+      if (chapterRefs.length > 0) {
+        void handleGenerateChapterStudy();
+      }
+      return;
     }
-  };
+    const offset = chapterCardOffsetsRef.current[initialJournalRef];
+    if (offset != null && scrollRef.current) {
+      scrollRef.current.scrollTo({ y: offset, animated: true });
+    }
+  }, [initialJournalRef, chapterRefs, chapterStudy, handleGenerateChapterStudy]);
 
   const handlePauseResume = async () => {
     if (!session?.timerState) return;
@@ -603,8 +835,22 @@ export default function StudyScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.setupContent}>
-      <Text style={styles.title}>Study session</Text>
+    <ScrollView
+      ref={scrollRef}
+      style={styles.container}
+      contentContainerStyle={styles.setupContent}
+    >
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>Study session</Text>
+        <View style={styles.titleActionsRow}>
+          <Pressable onPress={() => router.push("/study/plans" as never)} style={styles.myJournalBtn}>
+            <Text style={styles.myJournalBtnText}>Study Plans</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push("/study/journal")} style={styles.myJournalBtn}>
+            <Text style={styles.myJournalBtnText}>My Journal</Text>
+          </Pressable>
+        </View>
+      </View>
       {!process.env.EXPO_PUBLIC_API_URL?.trim() && (
         <View style={styles.envBanner}>
           <Text style={styles.envBannerText}>EXPO_PUBLIC_API_URL is not set. Add it to .env and run: npx expo start -c</Text>
@@ -738,7 +984,15 @@ export default function StudyScreen() {
             onGenerate={() => handleGenerateChapterStudy()}
             generating={loading}
           />
-          {chapterStudy && (
+          {loading && chapterRefs.length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>Study helps</Text>
+              <Text style={styles.helperText}>Loading…</Text>
+              <StudyCardSkeleton />
+              <StudyCardSkeleton />
+            </>
+          )}
+          {!loading && chapterStudy && (
             <>
               <Text style={styles.sectionTitle}>Study helps</Text>
               {chapterFromCache && (
@@ -746,77 +1000,178 @@ export default function StudyScreen() {
                   Showing your last result for this chapter set. Tap Regenerate for a fresh set of prompts.
                 </Text>
               )}
-              {chapterStudy.chapters.map((ch) => (
-                <View key={ch.reference} style={styles.card}>
-                  <Text style={styles.scriptureRef}>{ch.reference}</Text>
-                  <Text style={styles.cardBigIdea}>{ch.bigIdea}</Text>
-                  {ch.context ? (
-                    <Text style={styles.cardSummary}>{ch.context}</Text>
-                  ) : null}
+              {chapterStudy.chapters.map((ch) => {
+                const pinsForChapter = pinnedLookForMap[ch.reference] ?? [];
+                const lookForItems = (ch.lookFor ?? []).filter(Boolean).slice(0, 5);
+                return (
+                  <View
+                    key={ch.reference}
+                    style={styles.card}
+                    onLayout={(e) => {
+                      const y = e.nativeEvent.layout.y;
+                      chapterCardOffsetsRef.current[ch.reference] = y;
+                      if (initialJournalRef === ch.reference && scrollRef.current) {
+                        scrollRef.current.scrollTo({ y, animated: true });
+                      }
+                    }}
+                  >
+                    <Text style={styles.scriptureRef}>{ch.reference}</Text>
+                    <Text style={styles.cardBigIdea}>{ch.bigIdea}</Text>
 
-                  {ch.lookFor && ch.lookFor.length > 0 && (
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.cardLabel}>Look for</Text>
-                      {ch.lookFor.map((lf, idx) => (
-                        <Text key={idx} style={styles.bullet}>
-                          • {lf}
-                        </Text>
-                      ))}
-                    </View>
-                  )}
-
-                  {ch.discussionQuestions && ch.discussionQuestions.length > 0 && (
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.cardLabel}>Discuss</Text>
-                      {ch.discussionQuestions.map((q, idx) => (
-                        <Text key={idx} style={styles.bullet}>
-                          • {q}
-                        </Text>
-                      ))}
-                    </View>
-                  )}
-
-                  {ch.crossReferences && ch.crossReferences.length > 0 && (
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.cardLabel}>Cross references</Text>
-                      <View style={styles.crossRefChipRow}>
-                        {ch.crossReferences.flatMap((group) =>
-                          group.refs.map((ref) => (
-                            <View key={group.theme + ref} style={styles.themeChip}>
-                              <Text style={styles.themeChipText}>
-                                {group.theme ? `${group.theme}: ${ref}` : ref}
-                              </Text>
-                            </View>
-                          ))
-                        )}
-                      </View>
-                    </View>
-                  )}
-
-                  {ch.links && ch.links.length > 0 && (
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.cardLabel}>Open</Text>
-                      <View style={styles.readingActionsRow}>
-                        {ch.links.map((ln) => (
-                          <Pressable
-                            key={ln.label + ln.url}
-                            onPress={() => ln.url && Linking.openURL(ln.url)}
-                            style={styles.linkBtn}
-                          >
-                            <Text style={styles.linkBtnText}>{ln.label || "Open"}</Text>
-                          </Pressable>
+                    {pinsForChapter.length > 0 && (
+                      <View style={styles.pinnedFocusCard}>
+                        <Text style={styles.cardLabel}>Pinned focus</Text>
+                        {pinsForChapter.map((p) => (
+                          <Text key={p} style={styles.bullet}>
+                            • {p}
+                          </Text>
                         ))}
                       </View>
-                    </View>
-                  )}
+                    )}
 
-                  {ch.studyPlanSuggestion ? (
-                    <Text style={[styles.cardSummary, { marginTop: 8 }]}>
-                      {ch.studyPlanSuggestion}
-                    </Text>
-                  ) : null}
-                </View>
-              ))}
+                    {ch.context ? (
+                      <Text style={styles.cardSummary}>{ch.context}</Text>
+                    ) : null}
+
+                    {ch.themes && ch.themes.length > 0 && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={styles.cardLabel}>Themes</Text>
+                        <View style={styles.themesRow}>
+                          {ch.themes.map((theme) => (
+                            <Pressable
+                              key={theme.id || theme.title}
+                              onPress={() =>
+                                router.push({
+                                  pathname: "/study/theme",
+                                  params: {
+                                    data: JSON.stringify({
+                                      reference: ch.reference,
+                                      theme,
+                                      crossReferences: (ch.crossReferences ?? []).filter(
+                                        (cr) =>
+                                          (cr.themeId && theme.id && cr.themeId === theme.id) ||
+                                          (!cr.themeId && cr.label && cr.label === theme.title)
+                                      ),
+                                      relatedChapters:
+                                        ch.relatedChaptersByTheme?.[theme.id] ?? [],
+                                    }),
+                                  },
+                                })
+                              }
+                              style={styles.themeChip}
+                            >
+                              <Text style={styles.themeChipText}>{theme.title}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                    {lookForItems.length > 0 && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={styles.cardLabel}>Look for while reading</Text>
+                        {lookForItems.map((lf) => {
+                          const isPinned = pinsForChapter.includes(lf);
+                          return (
+                            <View key={lf} style={styles.lookForRow}>
+                              <Text style={styles.bullet}>• {lf}</Text>
+                              <Pressable
+                                onPress={() => togglePin(ch.reference, lf)}
+                                style={styles.pinBtn}
+                              >
+                                <Text
+                                  style={[
+                                    styles.pinText,
+                                    isPinned && styles.pinTextActive,
+                                  ]}
+                                >
+                                  {isPinned ? "Pinned" : "Pin"}
+                                </Text>
+                              </Pressable>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+
+                    {ch.discussionQuestions && ch.discussionQuestions.length > 0 && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={styles.cardLabel}>Discuss</Text>
+                        {ch.discussionQuestions.map((q, idx) => (
+                          <Text key={idx} style={styles.bullet}>
+                            • {q}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+
+                    {ch.crossReferences && ch.crossReferences.length > 0 && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={styles.cardLabel}>Cross references</Text>
+                        <View style={styles.crossRefChipRow}>
+                          {ch.crossReferences.flatMap((group, groupIndex) =>
+                            group.refs.map((ref) => {
+                              const label = group.label ?? "";
+                              const key = `${groupIndex}:${label || group.themeId || "group"}:${ref}`;
+                              return (
+                                <View key={key} style={styles.themeChip}>
+                                  <Text style={styles.themeChipText}>
+                                    {label ? `${label}: ${ref}` : ref}
+                                  </Text>
+                                </View>
+                              );
+                            })
+                          )}
+                        </View>
+                      </View>
+                    )}
+
+                    {ch.links && ch.links.length > 0 && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={styles.cardLabel}>Open</Text>
+                        <View style={styles.readingActionsRow}>
+                          {ch.links.map((ln) => (
+                            <Pressable
+                              key={ln.label + ln.url}
+                              onPress={() => ln.url && Linking.openURL(ln.url)}
+                              style={styles.linkBtn}
+                            >
+                              <Text style={styles.linkBtnText}>{ln.label || "Open"}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                    {ch.studyPlanSuggestion ? (
+                      <Text style={[styles.cardSummary, { marginTop: 8 }]}>
+                        {ch.studyPlanSuggestion}
+                      </Text>
+                    ) : null}
+
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={styles.cardLabel}>Journal / Personal Revelation</Text>
+                      <TextInput
+                        style={styles.journalInput}
+                        value={chapterJournalDrafts[ch.reference] ?? ""}
+                        onChangeText={(text) => scheduleJournalSave(ch.reference, text)}
+                        onBlur={() => {
+                          void flushJournalSave(ch.reference);
+                        }}
+                        multiline
+                        placeholder="What stood out to you? Any impressions, questions, or actions?"
+                      />
+                      <Text style={styles.journalStatus}>
+                        {chapterJournalSaving[ch.reference]
+                          ? "Saving…"
+                          : chapterJournalSavedAt[ch.reference]
+                          ? `Saved at ${formatSavedAt(chapterJournalSavedAt[ch.reference])}`
+                          : "Not yet saved"}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
               {chapterStudy.chapters.length > 0 && (
                 <Pressable
                   onPress={() => handleGenerateChapterStudy({ forceRefresh: true })}
@@ -849,7 +1204,23 @@ export default function StudyScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   setupContent: { padding: 20, paddingTop: 48, paddingBottom: 40 },
-  title: { fontSize: 28, fontWeight: "800", marginBottom: 20 },
+  titleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  title: { fontSize: 28, fontWeight: "800" },
+  titleActionsRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  myJournalBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#0a7ea4",
+    backgroundColor: "#e8f4f8",
+  },
+  myJournalBtnText: { fontSize: 13, fontWeight: "600", color: "#0a7ea4" },
   label: { fontSize: 16, fontWeight: "600", marginBottom: 8 },
   durationRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   durBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#ddd" },
@@ -910,8 +1281,21 @@ const styles = StyleSheet.create({
   crossRefPill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "#e8f4f8" },
   crossRefPillText: { fontSize: 13, color: "#0a7ea4", fontWeight: "600" },
   lookForCard: { backgroundColor: "#f8f9fa", borderRadius: 10, padding: 12, marginTop: 16, marginBottom: 8 },
+  pinnedFocusCard: {
+    backgroundColor: "#f8f9fa",
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 4,
+    marginBottom: 4,
+  },
   lookForLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginBottom: 4 },
   lookForText: { fontSize: 15, color: "#333" },
+  lookForRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
   ponderQuestion: { fontSize: 15, color: "#333", fontStyle: "italic", marginBottom: 12 },
   scripturePassage: { fontSize: 15, color: "#333", lineHeight: 22, marginBottom: 8 },
   backgroundSection: { marginTop: 4, marginBottom: 4 },
@@ -931,6 +1315,16 @@ const styles = StyleSheet.create({
   journalInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 12, fontSize: 15, minHeight: 56, textAlignVertical: "top" },
   saveJournalBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 12, alignItems: "center", backgroundColor: "#0a7ea4" },
   saveJournalBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  journalStatus: { fontSize: 12, color: "#666", marginTop: 4 },
+  pinBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  pinText: { fontSize: 11, color: "#555" },
+  pinTextActive: { color: "#0a7ea4", fontWeight: "700" },
 
   chatThread: { maxHeight: 180, marginBottom: 8 },
   chatBubble: { maxWidth: "85%", padding: 10, borderRadius: 12, marginBottom: 6 },

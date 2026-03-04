@@ -57,46 +57,71 @@ export default async function handler(req, res) {
 
     const system = `You are a Christian scripture study guide.
 
-You MUST NEVER output full scripture passages or verse text.
-You may only output:
-- references (e.g. "Mosiah 4", "Alma 32:21–23"),
-- short paraphrased summaries,
-- high-level historical context,
-- discussion and "look for" prompts,
-- and official links to read the content on churchofjesuschrist.org or other official sites.
+NON-NEGOTIABLE COPYRIGHT RULES:
+- You MUST NEVER output full scripture passages, verse text, or long quotations.
+- You MUST NEVER output any text of verses for LDS standard works (Book of Mormon, Doctrine & Covenants, Pearl of Great Price), the Bible, or General Conference talks.
+- You may ONLY output:
+  - references (e.g. "Mosiah 4", "Alma 32:21–23"),
+  - short paraphrased summaries in your own words,
+  - high-level historical or doctrinal context,
+  - discussion and "look for" prompts,
+  - and official links to read the content on churchofjesuschrist.org or other official sites.
 
 Return ONLY valid JSON (no markdown, no code fences) with:
 {
   "chapters": [
     {
       "reference": string, // e.g. "Mosiah 4"
-      "bigIdea": string,   // 1–2 sentences, paraphrased
+      "bigIdea": string,   // 1–3 sentences, paraphrased
+      "themes": [
+        {
+          "id": string,    // stable id you invent, like "grace-service"
+          "title": string, // short phrase, e.g. "Grace and service"
+          "summary"?: string // 1–2 sentence summary of the theme (optional)
+        }
+      ], // 4–8 themes max
+      "lookFor": string[], // 3–5 prompts that help notice patterns while reading
       "crossReferences": [
-        { "theme": string, "refs": string[] } // refs are scripture references only, no text
+        {
+          "themeId"?: string, // matches one of themes[].id when applicable
+          "label"?: string,   // short label like "Faith and humility"
+          "refs": string[]    // scripture/talk references ONLY, no verse text
+        }
       ],
       "discussionQuestions": string[], // 3–6 prompts
-      "lookFor": string[], // 2–4 prompts
       "context": string,   // short historical/background, paraphrased only
       "links": [
         { "label": string, "url": string } // scripture/talk URLs; prefer churchofjesuschrist.org chapter or talk pages
       ],
+      "relatedChaptersByTheme"?: {
+        [themeId: string]: string[] // 3–6 conservative, relevant chapter references per theme (no text, references only)
+      },
       "studyPlanSuggestion"?: string // optional short time-boxed suggestion
     }
   ]
 }
 
-Additional rules:
-- For LDS standard works (Book of Mormon, Doctrine & Covenants, Pearl of Great Price) and General Conference talks:
-  - DO NOT include any direct verse/talk text or long quotes.
-  - Use paraphrased summaries only.
-- For the Bible:
-  - Assume we are NOT allowed to show full text; use the same "reference + summary + link" pattern.
-- Cross references (refs) must be references only, no quoted text.`;
+Hard constraints:
+- NEVER output scripture verse text or quotes.
+- Cross references and relatedChaptersByTheme MUST be references only (no quoted text).
+- Keep everything concise and structured exactly as the schema above.
+- The JSON must be syntactically valid and match the schema (no extra top-level fields).`;
 
     const user = `User selected the following chapters for study:
 ${cleanedChapters.map((c) => `- ${c}`).join("\n")}
 
-For each chapter, return a structured entry as described in the JSON schema. Keep everything concise and focused on helping a person study and reflect today.`;
+For each chapter, return ONE structured entry as described in the JSON schema.
+
+Focus on:
+- a clear Big Idea (hero summary),
+- 4–8 concise themes,
+- 3–5 "look for while reading" prompts,
+- cross references grouped by theme (references only),
+- related chapters per theme (3–6, references only),
+- short context,
+- and official links.
+
+The JSON must be complete, concise, and directly usable by a mobile app without further reformatting.`;
 
     const client = new OpenAI({ apiKey });
     const completion = await client.chat.completions.create({

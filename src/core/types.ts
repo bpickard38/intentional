@@ -162,22 +162,53 @@ export type StudyPlanV2 = {
   optional?: { memoryVerse?: string; prayerPrompt?: string };
 };
 
-export type ChapterStudyResult = {
-  reference: string;
-  bigIdea: string;
-  crossReferences: { theme: string; refs: string[] }[];
-  discussionQuestions: string[];
-  lookFor: string[];
-  context: string;
-  links: { label: string; url: string }[];
+export type StudyTheme = {
+  id: string;
+  title: string;
+  summary?: string;
+};
+
+export type StudyCrossReference = {
+  /** Optional theme id this group belongs to (matches StudyTheme.id). */
+  themeId?: string;
+  /** Optional short label for this group (e.g., "Faith and humility"). */
+  label?: string;
+  /** Scripture or talk references only; no verse text or quotes. */
+  refs: string[];
+};
+
+export type StudyChapterResult = {
+  reference: string; // e.g., "Mosiah 4"
+  bigIdea: string; // 1–3 sentences
+  themes: StudyTheme[]; // 4–8 themes max
+  lookFor: string[]; // 3–5 prompts max
+  crossReferences: StudyCrossReference[]; // grouped by theme, references only
+  discussionQuestions: string[]; // optional in API, always safe to treat as array
+  context: string; // short bullets or short paragraph
+  links: { label: string; url: string }[]; // churchofjesuschrist.org links
+  /** Optional per-theme related chapters; key is StudyTheme.id, values are references only. */
+  relatedChaptersByTheme?: Record<string, string[]>;
+  /** Optional short time-boxed suggestion kept for compatibility with existing UI. */
   studyPlanSuggestion?: string;
 };
 
+// Backwards-compatible alias for existing references.
+export type ChapterStudyResult = StudyChapterResult;
+
 export type ChapterStudyResponse = {
-  chapters: ChapterStudyResult[];
+  chapters: StudyChapterResult[];
   cacheKey?: string;
   generatedAt: string;
 };
+
+export type StudyJournalEntry = {
+  reference: string;
+  text: string;
+  updatedAt: string;
+};
+
+/** Persisted per-chapter pinned "Look for" prompts keyed by chapter reference. */
+export type StudyPinsMap = Record<string, string[]>;
 
 export type ChatMessage = {
   id: string;
@@ -225,4 +256,40 @@ export type UserProfile = {
    /** Quick | Guided | Deep Dive. Default GUIDED. */
    studyDepth?: StudyDepth;
   createdAt: string;
+};
+
+/** Sources toggles for AI Study Plan Generator. */
+export type StudyPlanSources = {
+  bible: boolean;
+  bom: boolean;
+  dc: boolean;
+  pgp: boolean;
+};
+
+/** Single day in a generated study plan (references only, no verse text). */
+export type StudyPlanDay = {
+  id: string;
+  dayNumber: number;
+  focus: string;
+  references: string[];
+  bigIdea: string;
+  lookFor: string[];
+  reflection: string;
+  whyNext?: string;
+  linkUrls: { label: string; url: string }[];
+};
+
+/** Multi-day study plan (AI-generated, persisted locally). */
+export type StudyPlanDoc = {
+  id: string;
+  title: string;
+  topic: string;
+  createdAt: string;
+  updatedAt: string;
+  length: number;
+  minutesPerDay: number;
+  sources: StudyPlanSources;
+  description: string;
+  days: StudyPlanDay[];
+  progress: { completedDayIds: string[] };
 };

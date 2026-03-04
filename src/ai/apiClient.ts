@@ -7,8 +7,15 @@ import type {
   StudyDepth,
   ChapterStudyResponse,
   ChapterStudyResult,
+  StudyPlanDoc,
+  StudyPlanSources,
 } from "@/src/core/types";
 import { getJson, setJson } from "@/src/core/storage";
+import {
+  buildPlanCacheHash,
+  getCachedPlan,
+  setCachedPlan,
+} from "@/src/study/planStorage";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
 
@@ -71,9 +78,25 @@ function ensureString(v: unknown, def: string): string {
   return def;
 }
 
-async function fetchJson<T>(url: string, body: unknown): Promise<T> {
+async function fetchJson<T>(
+  url: string,
+  body: unknown,
+  opts?: { signal?: AbortSignal }
+): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+  const signal = opts?.signal;
+  const onAbort = () => {
+    clearTimeout(timeoutId);
+    controller.abort();
+  };
+  if (signal?.aborted) {
+    clearTimeout(timeoutId);
+    throw new Error("Request aborted.");
+  }
+  signal?.addEventListener("abort", onAbort);
+
   let res: Response;
   try {
     res = await fetch(url, {
@@ -84,11 +107,13 @@ async function fetchJson<T>(url: string, body: unknown): Promise<T> {
     });
   } catch (err) {
     clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", onAbort);
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("abort")) throw new Error("Request timed out.");
+    if (msg.includes("abort")) throw new Error("Request aborted.");
     throw new Error("Network request failed. Check API URL.");
   }
   clearTimeout(timeoutId);
+  signal?.removeEventListener("abort", onAbort);
 
   let text: string;
   try {
@@ -117,20 +142,46 @@ function normalizeChapterStudy(raw: unknown, cacheKey: string): ChapterStudyResp
   const chaptersRaw = ensureArray(o.chapters, []);
   const chapters: ChapterStudyResult[] = chaptersRaw.map((c: unknown) => {
     const x = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
+    const themes = ensureArray(x.themes, []).map((t: unknown) => {
+      const y = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
+      return {
+        id: ensureString(y.id, ""),
+        title: ensureString(y.title, ""),
+        summary: y.summary != null ? ensureString(y.summary, "") : undefined,
+      };
+    });
+
+    const crossReferences = ensureArray(x.crossReferences, []).map((cr: unknown) => {
+      const y = (cr && typeof cr === "object" ? cr : {}) as Record<string, unknown>;
+      return {
+        themeId: y.themeId != null ? ensureString(y.themeId, "") : undefined,
+        label: y.label != null ? ensureString(y.label, "") : undefined,
+        refs: ensureArray(y.refs, []).map((r) => ensureString(r, "")),
+      };
+    });
+
+    const relatedChaptersSource =
+      x.relatedChaptersByTheme && typeof x.relatedChaptersByTheme === "object"
+        ? (x.relatedChaptersByTheme as Record<string, unknown>)
+        : undefined;
+    const relatedChaptersByTheme: Record<string, string[]> | undefined = relatedChaptersSource
+      ? Object.fromEntries(
+          Object.entries(relatedChaptersSource).map(([k, v]) => [
+            k,
+            ensureArray(v, []).map((ref) => ensureString(ref, "")),
+          ])
+        )
+      : undefined;
+
     return {
       reference: ensureString(x.reference, ""),
       bigIdea: ensureString(x.bigIdea, ""),
-      crossReferences: ensureArray(x.crossReferences, []).map((cr: unknown) => {
-        const y = (cr && typeof cr === "object" ? cr : {}) as Record<string, unknown>;
-        return {
-          theme: ensureString(y.theme, ""),
-          refs: ensureArray(y.refs, []).map((r) => ensureString(r, "")),
-        };
-      }),
+      themes,
+      crossReferences,
       discussionQuestions: ensureArray(x.discussionQuestions, []).map((q) =>
         ensureString(q, "")
       ),
-      lookFor: ensureArray(x.lookFor, []).map((l) => ensureString(l, "")),
+      lookFor: ensureArray(x.lookFor, []).map((l) => ensureString(l, "")).slice(0, 5),
       context: ensureString(x.context, ""),
       links: ensureArray(x.links, []).map((ln: unknown) => {
         const y = (ln && typeof ln === "object" ? ln : {}) as Record<string, unknown>;
@@ -139,6 +190,7 @@ function normalizeChapterStudy(raw: unknown, cacheKey: string): ChapterStudyResp
           url: ensureString(y.url, ""),
         };
       }),
+      relatedChaptersByTheme,
       studyPlanSuggestion:
         x.studyPlanSuggestion != null ? ensureString(x.studyPlanSuggestion, "") : undefined,
     };
@@ -375,29 +427,148 @@ function normalizeChapterKey(chapters: string[]): string {
     .join(" | ");
 }
 
+const STUDY_CACHE_KEY = "study_cache_v1";
+const STUDY_PROMPT_VERSION = "study_v1";
+
+type StudyCacheMap = Record<string, ChapterStudyResponse>;
+
+async function getStudyCacheMap(): Promise<StudyCacheMap> {
+  const raw = await getJson<StudyCacheMap>(STUDY_CACHE_KEY);
+  if (!raw || typeof raw !== "object") return {};
+  return raw;
+}
+
+async function getStudyCacheEntry(hash: string): Promise<ChapterStudyResponse | null> {
+  const map = await getStudyCacheMap();
+  const entry = map[hash];
+  if (!entry || !Array.isArray(entry.chapters) || entry.chapters.length === 0) {
+    return null;
+  }
+  return entry;
+}
+
+async function setStudyCacheEntry(hash: string, value: ChapterStudyResponse): Promise<void> {
+  const map = await getStudyCacheMap();
+  map[hash] = value;
+  await setJson(STUDY_CACHE_KEY, map);
+}
+
+function buildStudyCacheHash(
+  chapters: string[],
+  opts?: { studyDepth?: StudyDepth | null }
+): string {
+  const normalizedChapters = normalizeChapterKey(chapters);
+  const payload = {
+    chapters: normalizedChapters,
+    studyDepth: opts?.studyDepth ?? null,
+    promptVersion: STUDY_PROMPT_VERSION,
+  };
+  return JSON.stringify(payload);
+}
+
 export async function generateChapterStudy(
   chapterRefs: string[],
-  opts?: { forceRefresh?: boolean }
+  opts?: { forceRefresh?: boolean; studyDepth?: StudyDepth; signal?: AbortSignal }
 ): Promise<{ result: ChapterStudyResponse; fromCache: boolean }> {
   const normalizedKey = normalizeChapterKey(chapterRefs);
-  const storageKey = `chapterStudyCache:v1:${normalizedKey}`;
+  const legacyStorageKey = `chapterStudyCache:v1:${normalizedKey}`;
+  const cacheHash = buildStudyCacheHash(chapterRefs, { studyDepth: opts?.studyDepth ?? null });
 
   if (!opts?.forceRefresh) {
-    const cached = await getJson<ChapterStudyResponse>(storageKey);
-    if (cached && cached.chapters && cached.chapters.length > 0) {
-      return { result: cached, fromCache: true };
+    // 1) New cache map (study_cache_v1).
+    const cachedNew = await getStudyCacheEntry(cacheHash);
+    if (cachedNew) {
+      return { result: cachedNew, fromCache: true };
+    }
+    // 2) Legacy per-key cache (chapterStudyCache:v1:...).
+    const cachedLegacy = await getJson<ChapterStudyResponse>(legacyStorageKey);
+    if (cachedLegacy && cachedLegacy.chapters && cachedLegacy.chapters.length > 0) {
+      // Keep legacy entry, but also seed the new cache map.
+      await setStudyCacheEntry(cacheHash, cachedLegacy);
+      return { result: cachedLegacy, fromCache: true };
     }
   }
 
   const url = apiUrl("study/generate");
-  const data = await fetchJson<unknown>(url, { chapters: chapterRefs });
+  const data = await fetchJson<unknown>(
+    url,
+    { chapters: chapterRefs },
+    opts?.signal ? { signal: opts.signal } : undefined
+  );
   const raw =
     data && typeof data === "object" && (data as Record<string, unknown>).chapters
       ? data
       : { chapters: data };
   const normalized = normalizeChapterStudy(raw, normalizedKey);
-  await setJson(storageKey, normalized);
+  // Write to both caches so existing behavior continues to work.
+  await setJson(legacyStorageKey, normalized);
+  await setStudyCacheEntry(cacheHash, normalized);
   return { result: normalized, fromCache: false };
+}
+
+export async function generateStudyPlanDoc(
+  params: {
+    topic: string;
+    length: number;
+    minutesPerDay: number;
+    sources: StudyPlanSources;
+  },
+  opts?: { forceRefresh?: boolean; signal?: AbortSignal }
+): Promise<{ plan: StudyPlanDoc; fromCache: boolean }> {
+  const hash = buildPlanCacheHash(params);
+  if (!opts?.forceRefresh) {
+    const cached = await getCachedPlan(hash);
+    if (cached) return { plan: cached, fromCache: true };
+  }
+
+  const url = apiUrl("study/plan/generate");
+  const data = await fetchJson<StudyPlanDoc>(
+    url,
+    {
+      topic: params.topic.trim(),
+      length: params.length,
+      minutesPerDay: params.minutesPerDay,
+      sources: params.sources,
+    },
+    opts?.signal ? { signal: opts.signal } : undefined
+  );
+
+  const plan: StudyPlanDoc = {
+    id: typeof data.id === "string" ? data.id : "plan-" + Date.now(),
+    title: String(data.title ?? "").slice(0, 120),
+    topic: params.topic.trim(),
+    createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+    length: Array.isArray(data.days) ? data.days.length : 0,
+    minutesPerDay: params.minutesPerDay,
+    sources: params.sources,
+    description: String(data.description ?? "").slice(0, 500),
+    days: Array.isArray(data.days)
+      ? data.days.map((d: unknown, i: number) => {
+          const x = d && typeof d === "object" ? (d as Record<string, unknown>) : {};
+          return {
+            id: typeof x.id === "string" ? x.id : `${data.id}-day-${i + 1}`,
+            dayNumber: typeof x.dayNumber === "number" ? x.dayNumber : i + 1,
+            focus: String(x.focus ?? "").slice(0, 200),
+            references: Array.isArray(x.references) ? x.references.map((r) => String(r)).slice(0, 2) : [],
+            bigIdea: String(x.bigIdea ?? "").slice(0, 500),
+            lookFor: Array.isArray(x.lookFor) ? x.lookFor.map((l) => String(l)).slice(0, 4) : [],
+            reflection: String(x.reflection ?? "").slice(0, 300),
+            whyNext: x.whyNext != null ? String(x.whyNext).slice(0, 200) : undefined,
+            linkUrls: Array.isArray(x.linkUrls) ? x.linkUrls.slice(0, 4).map((l: unknown) => {
+              const y = l && typeof l === "object" ? (l as Record<string, unknown>) : {};
+              return { label: String(y.label ?? "Open"), url: String(y.url ?? "") };
+            }) : [],
+          };
+        })
+      : [],
+    progress: data.progress && typeof data.progress === "object" && Array.isArray((data.progress as { completedDayIds?: unknown }).completedDayIds)
+      ? { completedDayIds: (data.progress as { completedDayIds: string[] }).completedDayIds }
+      : { completedDayIds: [] },
+  };
+
+  await setCachedPlan(hash, plan);
+  return { plan, fromCache: false };
 }
 
 export type StudyChatResponse = {

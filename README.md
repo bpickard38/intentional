@@ -92,12 +92,32 @@ Join our community of developers creating universal apps.
 
 - **Frontend client:** The Study tab includes a “Chapter study” mode with a chapter picker (Standard Works → book → chapter chips). When you tap **Generate Study Helps**, the app calls `generateChapterStudy` from `src/ai/apiClient.ts`, which:
   - POSTs to `POST /api/study/generate` with `{ chapters: string[] }`.
-  - Caches results in AsyncStorage under keys like `chapterStudyCache:v1:<sorted chapter list>`.
+  - Normalizes the response into `StudyChapterResult` objects:
+    - `reference`, `bigIdea`, `themes[]`, `lookFor[]` (3–5 prompts), `crossReferences[]` (grouped by theme id/label with references only), `discussionQuestions[]`, `context`, `links[]`, optional `relatedChaptersByTheme`, and optional `studyPlanSuggestion`.
+  - Caches results in AsyncStorage under:
+    - legacy per-chapter keys like `chapterStudyCache:v1:<sorted chapter list>`, and
+    - a consolidated map key `study_cache_v1` keyed by a stable hash of selected chapters + settings + prompt version.
   - Returns `{ result, fromCache }` so the UI can show cached results instantly and offer a **Regenerate** button.
-- **Backend route:** `api/study/generate.js` uses `OPENAI_API_KEY` to call OpenAI and returns:
-  - For each chapter: `reference`, `bigIdea`, `crossReferences[{ theme, refs[] }]`, `discussionQuestions[]`, `lookFor[]`, `context`, and `links[{ label, url }]`, plus an optional `studyPlanSuggestion`.
-  - The route is **copyright safe**: it never returns full scripture or talk text, only references, summaries, prompts, and official links (e.g. `churchofjesuschrist.org`).
+- **Backend route:** `api/study/generate.js` uses `OPENAI_API_KEY` to call OpenAI and returns JSON only matching the schema above. Hard constraints enforced in the prompt:
+  - NEVER output scripture verse text or long quotations.
+  - Cross references and `relatedChaptersByTheme` contain references only (e.g., `"Mosiah 4"`, `"Alma 32:21–23"`).
+  - Provide concise big ideas, themes, “look for while reading” prompts, discussion questions, short context, and official links (prefer `churchofjesuschrist.org`).
 - **Usage:** Set `EXPO_PUBLIC_API_URL` to your deployed API base (for example, your Vercel URL). The app will hit:
   - `POST <API_URL>/api/generate-study-session`
   - `POST <API_URL>/api/study-chat`
   - `POST <API_URL>/api/study/generate`
+- **Local storage keys (study feature):**
+  - `study_journal_v1`: array of per-chapter journal entries `{ reference, text, updatedAt }` used by the “Journal / Personal Revelation” section and My Journal list.
+  - `study_pins_v1`: map `Record<reference, string[]>` of pinned “Look for while reading” prompts (max 3 per chapter), shown as Pinned focus.
+  - `study_cache_v1`: consolidated chapter-study cache keyed by a stable hash of chapter references + generation settings + prompt version (used to avoid duplicate AI calls and keep results available offline).
+
+## AI Study Plan Generator
+
+- **Entry point:** From the Study tab, tap **Study Plans** to open the plan home. From there you can **Create Plan** or open **My Plans** (saved plans list).
+- **Create Plan flow:** Choose topic (preset chips or custom), plan length (3 / 7 / 14 / 30 days), daily time (5 / 10 / 15 / 20 min), and source toggles (Bible, BOM, D&C, PGP). Tap **Generate Plan** to call the API; the plan is cached and saved locally, then you're taken to Plan Detail.
+- **Plan Detail:** Shows title, description, percent complete, and a day list with completion status. **Start / Resume** opens the first or first-incomplete day. Tapping a day opens Day Detail.
+- **Day Detail:** Shows Today's Focus, Read (chapter references + Open links), Big Idea, Look For (2–4 bullets), Reflection (1 question), optional "Why this next?", **Mark Complete** / **Mark Incomplete**, and **Generate study helps for today's chapter(s)** which opens the existing Chapter study flow with that day's references.
+- **Storage keys:** `study_plans_v1` (saved plans array), `study_plan_cache_v1` (generation cache keyed by topic + length + minutesPerDay + sources + promptVersion).
+- **Caching:** Before calling the plan generate API, the app checks the cache by hash; if found, that plan is returned (and can be saved again). Offline generation shows a clear error.
+- **Prompt constraints:** No scripture verse text or quotes. References only, focus ≤ 18 words, bigIdea 1–2 sentences, lookFor 2–4 items, reflection 1 question. Official church links only.
+- **Add preset topics:** Edit `TOPIC_CHIPS` in `app/study/plans/create.tsx`.
