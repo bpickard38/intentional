@@ -24,13 +24,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="streaks"
-        options={{
-          title: 'Streaks',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="flame.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="study"
         options={{
           title: 'Study',
@@ -38,19 +31,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="history"
+        name="path"
         options={{
-          title: 'History',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="clock.arrow.circlepath" color={color} />,
+          title: 'Path',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="point.topleft.down.to.point.bottomright.curvepath.fill" color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="gearshape.fill" color={color} />,
-        }}
-      />
+      <Tabs.Screen name="streaks" options={{ href: null }} />
+      <Tabs.Screen name="history" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
       <Tabs.Screen name="explore" options={{ href: null }} />
     </Tabs>
   );

@@ -21,6 +21,7 @@ const MAPPING = {
   'book.fill': 'menu-book',
   'clock.arrow.circlepath': 'history',
   'gearshape.fill': 'settings',
+  'point.topleft.down.to.point.bottomright.curvepath.fill': 'timeline',
 } as IconMapping;
 
 /**

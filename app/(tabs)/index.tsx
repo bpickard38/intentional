@@ -3,12 +3,16 @@ import {
   FlatList,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import type { FaithTradition, UserProfile, StudyDisplayMode, StudyDepth } from "@/src/core/types";
+import { getJson, setJson, removeKey } from "@/src/core/storage";
+import { Alert } from "react-native";
 import type { Habit, HabitLog, HabitSchedule } from "@/src/core/types";
 import { todayKey } from "@/src/core/dates";
 import {
@@ -22,6 +26,23 @@ import {
   deleteHabit,
 } from "@/src/habits/habitService";
 
+const PROFILE_KEY = "profile:v1";
+const STUDY_SESSIONS_KEY = "studySessions:v1";
+
+const TRADITIONS: FaithTradition[] = [
+  "Christian", "Catholic", "Protestant", "LDS", "Other", "PreferNotToSay",
+];
+const STUDY_DISPLAY_MODES: { value: StudyDisplayMode; label: string }[] = [
+  { value: "KEY_VERSES", label: "Key Verses" },
+  { value: "FULL_CHAPTER", label: "Full Chapter" },
+  { value: "BOTH", label: "Both" },
+];
+const STUDY_DEPTH_OPTIONS: { value: StudyDepth; label: string }[] = [
+  { value: "QUICK", label: "Quick" },
+  { value: "GUIDED", label: "Guided" },
+  { value: "DEEP_DIVE", label: "Deep Dive" },
+];
+
 export default function TodayScreen() {
   const router = useRouter();
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -32,17 +53,32 @@ export default function TodayScreen() {
   const [scheduleType, setScheduleType] = useState<"daily" | "weekly">("daily");
   const [targetPerWeek, setTargetPerWeek] = useState("3");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   const load = useCallback(async () => {
-    const [h, l, logs] = await Promise.all([
+    const [h, l, logs, p] = await Promise.all([
       listHabits(),
       getTodayHabitLog(),
       getAllLogs(),
+      getJson<UserProfile>(PROFILE_KEY),
     ]);
     setHabits(h);
     setLog(l);
     setAllLogs(logs);
+    setProfile(p ?? {
+      id: "default",
+      faithTradition: "Christian",
+      studyDisplayMode: "BOTH",
+      studyDepth: "GUIDED",
+      createdAt: new Date().toISOString(),
+    });
   }, []);
+
+  async function updateProfile(next: UserProfile) {
+    await setJson(PROFILE_KEY, next);
+    setProfile(next);
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -93,7 +129,12 @@ export default function TodayScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Today</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>Today</Text>
+        <Pressable onPress={() => setSettingsVisible(true)} style={styles.settingsBtn}>
+          <Text style={styles.settingsIcon}>⚙️</Text>
+        </Pressable>
+      </View>
 
       <View style={styles.progressRow}>
         <Text style={styles.progressText}>
@@ -154,13 +195,6 @@ export default function TodayScreen() {
 
       <Pressable onPress={() => setModalVisible(true)} style={styles.addBtn}>
         <Text style={styles.addBtnText}>Add habit</Text>
-      </Pressable>
-
-      <Pressable
-        onPress={() => router.push("/study")}
-        style={styles.studyBtn}
-      >
-        <Text style={styles.studyBtnText}>Start Study Session</Text>
       </Pressable>
 
       <Modal
@@ -249,13 +283,121 @@ export default function TodayScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Settings modal */}
+      <Modal
+        visible={settingsVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setSettingsVisible(false)}
+      >
+        <ScrollView style={settingsStyles.scroll} contentContainerStyle={settingsStyles.container}>
+          <View style={settingsStyles.headerRow}>
+            <Text style={settingsStyles.title}>Settings</Text>
+            <Pressable onPress={() => setSettingsVisible(false)} style={settingsStyles.closeBtn}>
+              <Text style={settingsStyles.closeBtnText}>Done</Text>
+            </Pressable>
+          </View>
+
+          {profile && (
+            <>
+              <Text style={settingsStyles.label}>Faith tradition</Text>
+              <View style={settingsStyles.options}>
+                {TRADITIONS.map((t) => (
+                  <Pressable
+                    key={t}
+                    onPress={() => updateProfile({ ...profile, faithTradition: t })}
+                    style={[settingsStyles.optionBtn, profile.faithTradition === t && settingsStyles.optionBtnActive]}
+                  >
+                    <Text style={[settingsStyles.optionText, profile.faithTradition === t && settingsStyles.optionTextActive]}>
+                      {t}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={settingsStyles.label}>Study mode</Text>
+              <View style={settingsStyles.options}>
+                {STUDY_DISPLAY_MODES.map(({ value, label }) => (
+                  <Pressable
+                    key={value}
+                    onPress={() => updateProfile({ ...profile, studyDisplayMode: value })}
+                    style={[settingsStyles.optionBtn, (profile.studyDisplayMode ?? "BOTH") === value && settingsStyles.optionBtnActive]}
+                  >
+                    <Text style={[settingsStyles.optionText, (profile.studyDisplayMode ?? "BOTH") === value && settingsStyles.optionTextActive]}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={settingsStyles.label}>Study depth</Text>
+              <View style={settingsStyles.options}>
+                {STUDY_DEPTH_OPTIONS.map(({ value, label }) => (
+                  <Pressable
+                    key={value}
+                    onPress={() => updateProfile({ ...profile, studyDepth: value })}
+                    style={[settingsStyles.optionBtn, (profile.studyDepth ?? "GUIDED") === value && settingsStyles.optionBtnActive]}
+                  >
+                    <Text style={[settingsStyles.optionText, (profile.studyDepth ?? "GUIDED") === value && settingsStyles.optionTextActive]}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          )}
+
+          <View style={settingsStyles.debugRow}>
+            <Text style={settingsStyles.debugLabel}>API</Text>
+            <Text style={settingsStyles.debugValue} numberOfLines={1}>
+              {process.env.EXPO_PUBLIC_API_URL?.trim() || "(not set)"}
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={() => {
+              Alert.alert("Reset Study Data", "This will delete all study sessions. Continue?", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Reset", style: "destructive", onPress: async () => { await removeKey(STUDY_SESSIONS_KEY); } },
+              ]);
+            }}
+            style={settingsStyles.resetBtn}
+          >
+            <Text style={settingsStyles.resetBtnText}>Reset study data</Text>
+          </Pressable>
+        </ScrollView>
+      </Modal>
     </View>
   );
 }
 
+const settingsStyles = StyleSheet.create({
+  scroll: { flex: 1 },
+  container: { padding: 20, paddingTop: 24, paddingBottom: 40, backgroundColor: "#fff" },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 24 },
+  title: { fontSize: 28, fontWeight: "800" },
+  closeBtn: { paddingHorizontal: 12, paddingVertical: 6 },
+  closeBtnText: { fontSize: 17, fontWeight: "600", color: "#0a7ea4" },
+  label: { fontSize: 16, fontWeight: "600", marginBottom: 12, marginTop: 20 },
+  options: { gap: 10 },
+  optionBtn: { paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: "#ddd" },
+  optionBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
+  optionText: { fontSize: 16 },
+  optionTextActive: { fontWeight: "700", color: "#0a7ea4" },
+  debugRow: { marginTop: 24, padding: 12, backgroundColor: "#f5f5f5", borderRadius: 8 },
+  debugLabel: { fontSize: 12, fontWeight: "600", color: "#666", marginBottom: 4 },
+  debugValue: { fontSize: 13, color: "#333" },
+  resetBtn: { marginTop: 16, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: "#dc3545", alignItems: "center" },
+  resetBtnText: { fontSize: 16, fontWeight: "600", color: "#dc3545" },
+});
+
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 48, backgroundColor: "#fff" },
-  title: { fontSize: 28, fontWeight: "800", marginBottom: 16 },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
+  title: { fontSize: 28, fontWeight: "800" },
+  settingsBtn: { padding: 6 },
+  settingsIcon: { fontSize: 22 },
   progressRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
   progressText: { fontSize: 16, fontWeight: "600" },
   weeklyText: { fontSize: 14, color: "#666", marginBottom: 12 },

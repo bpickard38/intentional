@@ -258,6 +258,52 @@ export type UserProfile = {
   createdAt: string;
 };
 
+// ── Life-planning types ──────────────────────────────────────────────────────
+
+export type Value = {
+  id: string;
+  text: string;
+  description?: string;
+  createdAt: string;
+};
+
+export type Milestone = {
+  id: string;
+  title: string;
+  habitId?: string;
+  completed: boolean;
+  completedAt?: string;
+};
+
+export type Goal = {
+  id: string;
+  valueId?: string;
+  title: string;
+  description?: string;
+  targetDate?: string;
+  milestones: Milestone[];
+  status: "active" | "completed" | "paused";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OnboardingMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt: string;
+};
+
+export type WeeklyReflection = {
+  id: string;
+  weekKey: string;
+  question: string;
+  answer?: string;
+  summary?: string;
+  generatedAt: string;
+  answeredAt?: string;
+};
+
 /** Sources toggles for AI Study Plan Generator. */
 export type StudyPlanSources = {
   bible: boolean;

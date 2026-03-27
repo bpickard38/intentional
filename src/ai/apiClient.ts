@@ -646,3 +646,37 @@ export async function generateStudyPlan(
   const raw = (data && typeof data === "object" && ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).studyPlan ?? (data as Record<string, unknown>).data)) ?? data;
   return normalizePlan(raw);
 }
+
+// ── Life-planning API calls ───────────────────────────────────────────────────
+
+export type OnboardingChatResponse = {
+  reply: string;
+  suggestedValues?: { text: string; description?: string }[];
+  suggestedGoals?: { title: string; description?: string; milestones?: { title: string }[] }[];
+  suggestedHabits?: { title: string; schedule: "daily" | "weekly" }[];
+  onboardingReady?: boolean;
+};
+
+export async function onboardingChat(
+  messages: { role: "user" | "assistant"; text: string }[],
+  opts?: { signal?: AbortSignal }
+): Promise<OnboardingChatResponse> {
+  const url = apiUrl("onboarding/chat");
+  return fetchJson<OnboardingChatResponse>(url, { messages }, opts);
+}
+
+export type ReflectionResponse = {
+  summary: string;
+  question: string;
+  encouragement: string;
+};
+
+export async function generateReflection(params: {
+  completedHabits: { name: string; count: number }[];
+  goals: { title: string; milestonesCompleted: number }[];
+  values: string[];
+  previousReflections?: string[];
+}): Promise<ReflectionResponse> {
+  const url = apiUrl("reflection/generate");
+  return fetchJson<ReflectionResponse>(url, params);
+}
