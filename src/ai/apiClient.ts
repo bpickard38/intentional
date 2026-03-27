@@ -30,7 +30,9 @@ function getBase(): string {
 
 function apiUrl(path: string): string {
   const base = getBase();
-  return `${base}${API_PREFIX}/${path}`.replace(/\/+/g, "/");
+  // Normalize only the path portion — don't touch the :// in the protocol.
+  const combined = `${API_PREFIX}/${path}`.replace(/\/+/g, "/");
+  return `${base}${combined}`;
 }
 
 /** Returns the base URL (no trailing slash). Only use when API_URL is set. */
@@ -54,7 +56,7 @@ export async function checkApiReachability(): Promise<{ ok: boolean; url: string
     return { ok: false, url: "", error: "EXPO_PUBLIC_API_URL is not set" };
   }
   // GET the root of the API: with /api prefix we hit base/api, with root we hit base/
-  const healthUrl = API_PREFIX ? `${base}${API_PREFIX}`.replace(/\/+/g, "/") : base;
+  const healthUrl = API_PREFIX ? `${base}${API_PREFIX}` : base;
   try {
     const res = await fetch(healthUrl, { method: "GET" });
     if (res.ok) {
