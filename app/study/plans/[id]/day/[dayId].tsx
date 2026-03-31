@@ -1,15 +1,47 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Linking,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import type { StudyPlanDoc, StudyPlanDay } from "@/src/core/types";
+import type { StudyPlanDoc, StudyPlanDay, UserProfile, StudyPlanV2 } from "@/src/core/types";
 import { getPlan, toggleDayComplete } from "@/src/study/planStorage";
+import { setJournal, getJournal } from "@/src/study/journalStorage";
+import { studyChat } from "@/src/ai/apiClient";
+import { getJson } from "@/src/core/storage";
+
+const PROFILE_KEY = "profile:v1";
+
+function formatTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s < 10 ? "0" : ""}${s}`;
+}
+
+function buildMinimalPlan(plan: StudyPlanDoc, day: StudyPlanDay): StudyPlanV2 {
+  return {
+    title: day.focus,
+    durationMin: plan.minutesPerDay >= 60 ? 60 : plan.minutesPerDay >= 30 ? 30 : 15,
+    topic: plan.topic,
+    mode: "devotional",
+    planSteps: [{ minutes: plan.minutesPerDay, label: "Read", instruction: day.focus }],
+    studyPlan: {
+      read: day.references.map((r) => ({ source: "BIBLE" as const, reference: r, url: "" })),
+      lookFor: day.lookFor[0] ?? "",
+      ponder: day.reflection,
+    },
+    scriptures: [],
+    talks: [],
+    articles: [],
+    reflectionPrompts: [day.reflection],
+    actionStep: "",
+  };
+}
 
 export default function DayDetailScreen() {
   const router = useRouter();
@@ -17,6 +49,24 @@ export default function DayDetailScreen() {
   const [plan, setPlan] = useState<StudyPlanDoc | null>(null);
   const [day, setDay] = useState<StudyPlanDay | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Timer
+  const [timerSec, setTimerSec] = useState(0);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Journal
+  const [journalText, setJournalText] = useState("");
+  const [journalSaving, setJournalSaving] = useState(false);
+  const [journalSavedAt, setJournalSavedAt] = useState<string | null>(null);
+  const journalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Ask a question
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<{ role: string; text: string }[]>([]);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -26,6 +76,14 @@ export default function DayDetailScreen() {
       setPlan(p);
       const d = p?.days?.find((x) => x.id === dayId) ?? null;
       setDay(d);
+      if (d) {
+        const key = `plan:${id}:day:${d.dayNumber}`;
+        const saved = await getJournal(key);
+        if (saved) {
+          setJournalText(saved.text);
+          setJournalSavedAt(saved.updatedAt);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -37,6 +95,35 @@ export default function DayDetailScreen() {
     }, [load])
   );
 
+  // Start timer automatically when plan/day load.
+  useEffect(() => {
+    if (!plan || !day) return;
+    const totalSec = plan.minutesPerDay * 60;
+    setTimerSec(totalSec);
+    setTimerRunning(true);
+  }, [plan?.id, day?.id]);
+
+  useEffect(() => {
+    if (timerRunning && timerSec > 0) {
+      intervalRef.current = setInterval(() => {
+        setTimerSec((s) => {
+          if (s <= 1) {
+            setTimerRunning(false);
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            return 0;
+          }
+          return s - 1;
+        });
+      }, 1000);
+    } else if (!timerRunning && intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [timerRunning]);
+
   const isCompleted = plan?.progress?.completedDayIds?.includes(dayId ?? "") ?? false;
 
   const handleToggleComplete = useCallback(async () => {
@@ -45,17 +132,55 @@ export default function DayDetailScreen() {
     await load();
   }, [id, dayId, load]);
 
-  const handleStudyHelps = useCallback(() => {
-    if (!day?.references?.length) return;
-    router.push({
-      pathname: "/(tabs)/study",
-      params: { planRefs: day.references.join(",") },
-    });
-  }, [day, router]);
+  const scheduleJournalSave = useCallback((text: string) => {
+    setJournalText(text);
+    if (journalTimerRef.current) clearTimeout(journalTimerRef.current);
+    journalTimerRef.current = setTimeout(async () => {
+      if (!day) return;
+      setJournalSaving(true);
+      try {
+        const key = `plan:${id}:day:${day.dayNumber}`;
+        await setJournal(key, text);
+        setJournalSavedAt(new Date().toISOString());
+      } finally {
+        setJournalSaving(false);
+      }
+    }, 800);
+  }, [day, id]);
+
+  const handleSendQuestion = useCallback(async () => {
+    const q = question.trim();
+    if (!q || !plan || !day || chatSending) return;
+    setChatError(null);
+    setChatSending(true);
+    const newHistory = [...chatHistory, { role: "user", text: q }];
+    setChatHistory(newHistory);
+    setQuestion("");
+    try {
+      const profile = await getJson<UserProfile>(PROFILE_KEY);
+      const minimalPlan = buildMinimalPlan(plan, day);
+      const res = await studyChat({
+        plan: minimalPlan,
+        mode: "devotional",
+        topic: plan.topic,
+        faithTradition: profile?.faithTradition ?? "Christian",
+        userQuestion: q,
+        lastMessages: chatHistory.slice(-6),
+      });
+      const replyText = res.answer || "I'm not sure how to answer that right now.";
+      setChatHistory((prev) => [...prev, { role: "assistant", text: replyText }]);
+      setAnswer(replyText);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setChatError(msg.length > 120 ? msg.slice(0, 120) + "…" : msg);
+    } finally {
+      setChatSending(false);
+    }
+  }, [question, plan, day, chatSending, chatHistory]);
 
   if (!id || !dayId || loading) {
     return (
-      <View style={styles.container}>
+      <View style={styles.center}>
         <Text style={styles.loadingText}>{loading ? "Loading…" : "Day not found."}</Text>
       </View>
     );
@@ -63,19 +188,38 @@ export default function DayDetailScreen() {
 
   if (!plan || !day) {
     return (
-      <View style={styles.container}>
+      <View style={styles.center}>
         <Text style={styles.errorText}>Day not found.</Text>
       </View>
     );
   }
 
+  const totalSec = plan.minutesPerDay * 60;
+  const progressPct = totalSec > 0 ? Math.max(0, (totalSec - timerSec) / totalSec) : 0;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Pressable onPress={() => router.back()} style={styles.backBtn}>
         <Text style={styles.backBtnText}>← Back</Text>
       </Pressable>
 
-      <Text style={styles.kicker}>Day {day.dayNumber}</Text>
+      {/* Timer */}
+      <View style={styles.timerRow}>
+        <View style={styles.timerBox}>
+          <View style={styles.timerTrack}>
+            <View style={[styles.timerFill, { width: `${progressPct * 100}%` as any }]} />
+          </View>
+          <Text style={styles.timerText}>{formatTime(timerSec)}</Text>
+        </View>
+        <Pressable
+          onPress={() => setTimerRunning((r) => !r)}
+          style={styles.timerBtn}
+        >
+          <Text style={styles.timerBtnText}>{timerRunning ? "Pause" : "Resume"}</Text>
+        </Pressable>
+      </View>
+
+      <Text style={styles.kicker}>Day {day.dayNumber} · {plan.title}</Text>
       <Text style={styles.focus}>{day.focus}</Text>
 
       {day.whyNext ? (
@@ -91,17 +235,19 @@ export default function DayDetailScreen() {
           <Text key={ref} style={styles.refText}>{ref}</Text>
         ))}
       </View>
-      <View style={styles.linkRow}>
-        {day.linkUrls.map((ln) => (
-          <Pressable
-            key={ln.label + ln.url}
-            onPress={() => ln.url && Linking.openURL(ln.url)}
-            style={styles.linkBtn}
-          >
-            <Text style={styles.linkBtnText}>{ln.label || "Open"}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {day.linkUrls.length > 0 && (
+        <View style={styles.linkRow}>
+          {day.linkUrls.map((ln) => (
+            <Pressable
+              key={ln.label + ln.url}
+              onPress={() => ln.url && Linking.openURL(ln.url)}
+              style={styles.linkBtn}
+            >
+              <Text style={styles.linkBtnText}>{ln.label || "Open"}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       <Text style={styles.sectionTitle}>Big Idea</Text>
       <Text style={styles.bodyText}>{day.bigIdea}</Text>
@@ -118,15 +264,54 @@ export default function DayDetailScreen() {
       <Text style={styles.sectionTitle}>Reflection</Text>
       <Text style={styles.bodyText}>{day.reflection}</Text>
 
-      <Pressable onPress={handleToggleComplete} style={styles.completeBtn}>
-        <Text style={styles.completeBtnText}>
-          {isCompleted ? "Mark Incomplete" : "Mark Complete"}
-        </Text>
-      </Pressable>
+      {/* Journal */}
+      <Text style={styles.sectionTitle}>Journal</Text>
+      <TextInput
+        style={styles.journalInput}
+        value={journalText}
+        onChangeText={scheduleJournalSave}
+        multiline
+        placeholder="What stood out to you? Any impressions or actions?"
+      />
+      <Text style={styles.journalStatus}>
+        {journalSaving ? "Saving…" : journalSavedAt ? `Saved at ${new Date(journalSavedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : ""}
+      </Text>
 
-      <Pressable onPress={handleStudyHelps} style={styles.secondaryBtn}>
-        <Text style={styles.secondaryBtnText}>
-          Generate study helps for today’s chapter(s)
+      {/* Ask a question */}
+      <Text style={styles.sectionTitle}>Ask a Question</Text>
+      {chatHistory.length > 0 && (
+        <View style={styles.chatHistory}>
+          {chatHistory.map((msg, i) => (
+            <View key={i} style={[styles.chatBubble, msg.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}>
+              <Text style={[styles.chatBubbleText, msg.role === "user" ? styles.chatBubbleTextUser : null]}>
+                {msg.text}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {chatError ? <Text style={styles.errorText}>{chatError}</Text> : null}
+      <View style={styles.chatInputRow}>
+        <TextInput
+          style={styles.chatInput}
+          value={question}
+          onChangeText={setQuestion}
+          placeholder="Ask about today's reading…"
+          multiline
+          editable={!chatSending}
+        />
+        <Pressable
+          onPress={handleSendQuestion}
+          style={[styles.sendBtn, (chatSending || !question.trim()) && styles.sendBtnDisabled]}
+          disabled={chatSending || !question.trim()}
+        >
+          <Text style={styles.sendBtnText}>{chatSending ? "…" : "Send"}</Text>
+        </Pressable>
+      </View>
+
+      <Pressable onPress={handleToggleComplete} style={[styles.completeBtn, isCompleted && styles.completeBtnDone]}>
+        <Text style={styles.completeBtnText}>
+          {isCompleted ? "✓ Completed" : "Mark Complete"}
         </Text>
       </Pressable>
     </ScrollView>
@@ -135,32 +320,67 @@ export default function DayDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
+  center: { flex: 1, backgroundColor: "#fff", justifyContent: "center", alignItems: "center", padding: 20 },
   content: { padding: 20, paddingTop: 48, paddingBottom: 40 },
   backBtn: { alignSelf: "flex-start", marginBottom: 12 },
   backBtnText: { fontSize: 16, color: "#0a7ea4", fontWeight: "600" },
-  kicker: { fontSize: 13, color: "#0a7ea4", textTransform: "uppercase", marginBottom: 4 },
-  focus: { fontSize: 18, fontWeight: "700", marginBottom: 16 },
-  whyNextBox: {
-    padding: 12,
-    backgroundColor: "#f0f4f8",
-    borderRadius: 10,
-    marginBottom: 16,
-  },
+
+  timerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 },
+  timerBox: { flex: 1 },
+  timerTrack: { height: 6, backgroundColor: "#deedf5", borderRadius: 3, overflow: "hidden", marginBottom: 4 },
+  timerFill: { height: "100%", backgroundColor: "#0a7ea4", borderRadius: 3 },
+  timerText: { fontSize: 22, fontWeight: "800", color: "#0a7ea4" },
+  timerBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: "#0a7ea4" },
+  timerBtnText: { fontSize: 14, fontWeight: "600", color: "#0a7ea4" },
+
+  kicker: { fontSize: 12, color: "#0a7ea4", fontWeight: "600", marginBottom: 4 },
+  focus: { fontSize: 20, fontWeight: "800", marginBottom: 16 },
+  whyNextBox: { padding: 12, backgroundColor: "#f0f4f8", borderRadius: 10, marginBottom: 16 },
   whyNextLabel: { fontSize: 12, fontWeight: "700", color: "#555", marginBottom: 4 },
   whyNextText: { fontSize: 14, color: "#333" },
-  sectionTitle: { fontSize: 16, fontWeight: "700", marginTop: 12, marginBottom: 6 },
+  sectionTitle: { fontSize: 16, fontWeight: "700", marginTop: 16, marginBottom: 6 },
   refRow: { marginBottom: 8 },
   refText: { fontSize: 15, fontWeight: "600", color: "#0a7ea4" },
   linkRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
-  linkBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: "#e8f4f8",
-  },
+  linkBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: "#e8f4f8" },
   linkBtnText: { fontSize: 14, fontWeight: "600", color: "#0a7ea4" },
-  bodyText: { fontSize: 15, color: "#333", marginBottom: 8 },
+  bodyText: { fontSize: 15, color: "#333", lineHeight: 22 },
   bullet: { fontSize: 15, color: "#333", marginBottom: 4 },
+
+  journalInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
+    minHeight: 100,
+    textAlignVertical: "top",
+    color: "#111",
+  },
+  journalStatus: { fontSize: 12, color: "#888", marginTop: 4, marginBottom: 4 },
+
+  chatHistory: { gap: 8, marginBottom: 10 },
+  chatBubble: { padding: 12, borderRadius: 12, maxWidth: "90%" },
+  chatBubbleUser: { backgroundColor: "#0a7ea4", alignSelf: "flex-end" },
+  chatBubbleAssistant: { backgroundColor: "#f0f4f8", alignSelf: "flex-start" },
+  chatBubbleText: { fontSize: 14, color: "#333", lineHeight: 20 },
+  chatBubbleTextUser: { color: "#fff" },
+  chatInputRow: { flexDirection: "row", gap: 8, alignItems: "flex-end" },
+  chatInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
+    maxHeight: 120,
+    textAlignVertical: "top",
+    color: "#111",
+  },
+  sendBtn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, backgroundColor: "#0a7ea4" },
+  sendBtnDisabled: { backgroundColor: "#9ac7da" },
+  sendBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+
   completeBtn: {
     marginTop: 24,
     paddingVertical: 14,
@@ -168,16 +388,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#2b8a3e",
   },
+  completeBtnDone: { backgroundColor: "#94d3a2" },
   completeBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-  secondaryBtn: {
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#0a7ea4",
-  },
-  secondaryBtnText: { fontSize: 15, fontWeight: "600", color: "#0a7ea4" },
   loadingText: { fontSize: 16, color: "#555" },
-  errorText: { fontSize: 16, color: "#b02a37" },
+  errorText: { fontSize: 14, color: "#b02a37", marginBottom: 8 },
 });

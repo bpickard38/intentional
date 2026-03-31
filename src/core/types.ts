@@ -310,6 +310,8 @@ export type StudyPlanSources = {
   bom: boolean;
   dc: boolean;
   pgp: boolean;
+  /** LDS only: include General Conference talk references in the plan. */
+  talks?: boolean;
 };
 
 /** Single day in a generated study plan (references only, no verse text). */

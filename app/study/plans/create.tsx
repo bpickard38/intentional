@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,9 +8,13 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import type { StudyPlanSources } from "@/src/core/types";
+import type { StudyPlanSources, UserProfile } from "@/src/core/types";
 import { generateStudyPlanDoc } from "@/src/ai/apiClient";
 import { savePlan } from "@/src/study/planStorage";
+import { getJson } from "@/src/core/storage";
+import { StudyProgressBar } from "@/components/StudyProgressBar";
+
+const PROFILE_KEY = "profile:v1";
 
 const TOPIC_CHIPS = [
   "Faith",
@@ -27,11 +30,20 @@ const TOPIC_CHIPS = [
 const LENGTH_OPTIONS = [3, 7, 14, 30];
 const MINUTES_OPTIONS = [5, 10, 15, 20];
 
-const DEFAULT_SOURCES: StudyPlanSources = {
+const BIBLE_ONLY_SOURCES: StudyPlanSources = {
+  bible: true,
+  bom: false,
+  dc: false,
+  pgp: false,
+  talks: false,
+};
+
+const LDS_DEFAULT_SOURCES: StudyPlanSources = {
   bible: true,
   bom: true,
   dc: true,
   pgp: true,
+  talks: false,
 };
 
 export default function CreatePlanScreen() {
@@ -40,10 +52,20 @@ export default function CreatePlanScreen() {
   const [customTopic, setCustomTopic] = useState("");
   const [length, setLength] = useState(7);
   const [minutesPerDay, setMinutesPerDay] = useState(10);
-  const [sources, setSources] = useState<StudyPlanSources>({ ...DEFAULT_SOURCES });
+  const [sources, setSources] = useState<StudyPlanSources>({ ...BIBLE_ONLY_SOURCES });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isLDS, setIsLDS] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const profile = await getJson<UserProfile>(PROFILE_KEY);
+      const lds = profile?.faithTradition === "LDS";
+      setIsLDS(lds);
+      setSources(lds ? { ...LDS_DEFAULT_SOURCES } : { ...BIBLE_ONLY_SOURCES });
+    })();
+  }, []);
 
   const effectiveTopic = (topic || customTopic.trim()).trim() || "Faith";
 
@@ -70,7 +92,7 @@ export default function CreatePlanScreen() {
       if (abortRef.current !== controller) return;
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("abort")) return;
-      setError(msg.includes("Network") || msg.includes("Failed") ? "Couldn’t reach the server. Check your connection." : msg);
+      setError(msg.includes("Network") || msg.includes("Failed") ? "Couldn't reach the server. Check your connection." : msg);
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null;
@@ -88,6 +110,8 @@ export default function CreatePlanScreen() {
     },
     []
   );
+
+  const ldsSources = (["bom", "dc", "pgp"] as const).filter(() => isLDS);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -143,31 +167,52 @@ export default function CreatePlanScreen() {
 
       <Text style={styles.label}>Include sources</Text>
       <View style={styles.toggleRow}>
-        {(["bible", "bom", "dc", "pgp"] as const).map((key) => (
-          <Pressable
-            key={key}
-            onPress={() => setSources((s) => ({ ...s, [key]: !s[key] }))}
-            style={[styles.toggle, sources[key] && styles.toggleActive]}
-          >
-            <Text style={[styles.toggleText, sources[key] && styles.toggleTextActive]}>
-              {key === "bible" ? "Bible" : key === "bom" ? "BOM" : key === "dc" ? "D&C" : "PGP"}
-            </Text>
-          </Pressable>
-        ))}
+        <Pressable
+          onPress={() => setSources((s) => ({ ...s, bible: !s.bible }))}
+          style={[styles.toggle, sources.bible && styles.toggleActive]}
+        >
+          <Text style={[styles.toggleText, sources.bible && styles.toggleTextActive]}>Bible</Text>
+        </Pressable>
+        {isLDS && (
+          <>
+            <Pressable
+              onPress={() => setSources((s) => ({ ...s, bom: !s.bom }))}
+              style={[styles.toggle, sources.bom && styles.toggleActive]}
+            >
+              <Text style={[styles.toggleText, sources.bom && styles.toggleTextActive]}>Book of Mormon</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setSources((s) => ({ ...s, dc: !s.dc }))}
+              style={[styles.toggle, sources.dc && styles.toggleActive]}
+            >
+              <Text style={[styles.toggleText, sources.dc && styles.toggleTextActive]}>D&C</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setSources((s) => ({ ...s, pgp: !s.pgp }))}
+              style={[styles.toggle, sources.pgp && styles.toggleActive]}
+            >
+              <Text style={[styles.toggleText, sources.pgp && styles.toggleTextActive]}>Pearl of Great Price</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setSources((s) => ({ ...s, talks: !s.talks }))}
+              style={[styles.toggle, sources.talks && styles.toggleActive]}
+            >
+              <Text style={[styles.toggleText, sources.talks && styles.toggleTextActive]}>Conf. Talks</Text>
+            </Pressable>
+          </>
+        )}
       </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+      <StudyProgressBar loading={loading} label="Building your plan…" />
 
       <Pressable
         onPress={handleGenerate}
         disabled={loading}
         style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]}
       >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.primaryBtnText}>Generate Plan</Text>
-        )}
+        <Text style={styles.primaryBtnText}>{loading ? "Generating…" : "Generate Plan"}</Text>
       </Pressable>
     </ScrollView>
   );

@@ -16,6 +16,7 @@ import {
   getCachedPlan,
   setCachedPlan,
 } from "@/src/study/planStorage";
+import { addToStudyHistory, getRecentlyStudiedRefs } from "@/src/study/studyHistory";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
 
@@ -402,6 +403,7 @@ export async function generateStudySession(
   studyDepth?: StudyDepth
 ): Promise<StudyPlanV2> {
   const url = apiUrl("generate-study-session");
+  const recentlyStudied = await getRecentlyStudiedRefs().catch(() => []);
   const data = await fetchJson<unknown>(url, {
     durationMin,
     topic,
@@ -409,16 +411,20 @@ export async function generateStudySession(
     faithTradition,
     studyDisplayMode: studyDisplayMode ?? "BOTH",
     studyDepth: studyDepth ?? "GUIDED",
+    recentlyStudied,
     requestId: Date.now(),
   });
   // API returns the full plan at top level (title, scriptures, readingCards, studyPlan, etc.).
-  // Do NOT use data.studyPlan as raw — that's the small { read, lookFor, ponder } object. Use data.plan or data.data only if present (nested wrapper), else the whole response.
   const raw =
     (data &&
       typeof data === "object" &&
       ((data as Record<string, unknown>).plan ?? (data as Record<string, unknown>).data)) ??
     data;
-  return normalizePlanV2(raw, durationMin, topic, mode);
+  const plan = normalizePlanV2(raw, durationMin, topic, mode);
+  // Save the studied references to history for future uniqueness.
+  const refs = (plan.readingCards ?? []).map((c) => c.reference).filter(Boolean);
+  if (refs.length) void addToStudyHistory(refs).catch(() => {});
+  return plan;
 }
 
 function normalizeChapterKey(chapters: string[]): string {

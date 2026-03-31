@@ -17,6 +17,18 @@ function generateId() {
   return "plan-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
 }
 
+function buildScriptureUrl(ref) {
+  if (!ref || typeof ref !== "string") return null;
+  const encoded = encodeURIComponent(ref.trim());
+  return `https://www.churchofjesuschrist.org/study/scriptures/search?lang=eng&query=${encoded}`;
+}
+
+function buildTalkSearchUrl(title, speaker) {
+  const q = [title, speaker].filter(Boolean).join(" ").trim();
+  if (!q) return "https://www.churchofjesuschrist.org/study/general-conference?lang=eng";
+  return `https://www.churchofjesuschrist.org/search?lang=eng&query=${encodeURIComponent(q)}`;
+}
+
 export default async function handler(req, res) {
   Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
   if (req.method === "OPTIONS") {
@@ -45,9 +57,10 @@ export default async function handler(req, res) {
       : 10;
     const sources = {
       bible: body.sources?.bible !== false,
-      bom: body.sources?.bom !== false,
-      dc: body.sources?.dc !== false,
-      pgp: body.sources?.pgp !== false,
+      bom: body.sources?.bom === true,
+      dc: body.sources?.dc === true,
+      pgp: body.sources?.pgp === true,
+      talks: body.sources?.talks === true,
     };
 
     if (!topic) {
@@ -67,6 +80,7 @@ export default async function handler(req, res) {
     if (sources.bom) sourceList.push("Book of Mormon");
     if (sources.dc) sourceList.push("Doctrine and Covenants");
     if (sources.pgp) sourceList.push("Pearl of Great Price");
+    const includeTalks = sources.talks === true;
 
     const system = `You are a Christian scripture study guide that creates multi-day study plans.
 
@@ -88,7 +102,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this exact shape:
       "lookFor": string[],    // 2–4 bullet prompts
       "reflection": string,    // 1 question
       "whyNext": string,  // Optional: 1 sentence linking this day to the previous
-      "linkUrls": [ { "label": string, "url": string } ]  // Official link per reference
+      "linkUrls": [ { "label": string, "url": string } ]  // Official link per reference${includeTalks ? ',\n      "talk": { "title": string, "speaker": string, "summary": string }  // Optional: 1 related General Conference talk per day' : ""}
     }
   ]
 }
@@ -101,7 +115,8 @@ RULES:
 - lookFor: exactly 2–4 items.
 - reflection: exactly 1 question.
 - whyNext: optional 1 sentence for day 2 onward linking to previous day.
-- linkUrls: use https://www.churchofjesuschrist.org/study/scriptures/... or equivalent for each reference.`;
+- linkUrls: include the reference label and leave the url field as an empty string "". URLs will be constructed server-side.${includeTalks ? "\n- talk: include 1 General Conference talk per day that relates to the day's focus. Provide title, speaker, and summary only — no URL." : ""}
+- Do NOT include any scripture verse text or quotes.`;
 
     const user = `Create a ${length}-day study plan on the topic: "${topic}".
 
@@ -137,17 +152,50 @@ Return the JSON object with "title", "description", and "days" as specified. Eac
     const now = new Date().toISOString();
     const planId = generateId();
     const days = Array.isArray(raw.days) ? raw.days : [];
-    const daysNormalized = days.slice(0, length).map((d, i) => ({
-      id: `${planId}-day-${i + 1}`,
-      dayNumber: typeof d.dayNumber === "number" ? d.dayNumber : i + 1,
-      focus: String(d.focus ?? "").slice(0, 200),
-      references: Array.isArray(d.references) ? d.references.map((r) => String(r).trim()).filter(Boolean).slice(0, 2) : [],
-      bigIdea: String(d.bigIdea ?? "").slice(0, 500),
-      lookFor: Array.isArray(d.lookFor) ? d.lookFor.map((l) => String(l)).filter(Boolean).slice(0, 4) : [],
-      reflection: String(d.reflection ?? "").slice(0, 300),
-      whyNext: d.whyNext != null ? String(d.whyNext).slice(0, 200) : undefined,
-      linkUrls: Array.isArray(d.linkUrls) ? d.linkUrls.slice(0, 4).map((l) => ({ label: String(l.label ?? "Open"), url: String(l.url ?? "") })) : [],
-    }));
+    const daysNormalized = days.slice(0, length).map((d, i) => {
+      const refs = Array.isArray(d.references) ? d.references.map((r) => String(r).trim()).filter(Boolean).slice(0, 2) : [];
+      // Build linkUrls from references using server-side URL construction so links are always valid.
+      const refLinks = refs.map((ref) => ({
+        label: ref,
+        url: buildScriptureUrl(ref) ?? "",
+      }));
+      // If the AI returned extra linkUrls, keep them but ignore the AI-provided url field and regenerate it.
+      const aiLinks = Array.isArray(d.linkUrls)
+        ? d.linkUrls.slice(0, 4).map((l) => {
+            const label = String(l.label ?? "").trim();
+            // If this label matches a ref we already have, skip (already covered by refLinks)
+            if (!label || refs.includes(label)) return null;
+            return { label, url: buildScriptureUrl(label) ?? "" };
+          }).filter(Boolean)
+        : [];
+      const combinedLinks = [...refLinks, ...aiLinks].slice(0, 4);
+
+      // Talk entry (LDS only when talks source enabled)
+      let talkEntry;
+      if (includeTalks && d.talk && typeof d.talk === "object") {
+        const title = String(d.talk.title ?? "").trim();
+        const speaker = String(d.talk.speaker ?? "").trim();
+        if (title) {
+          talkEntry = {
+            label: `${title}${speaker ? " — " + speaker : ""}`,
+            url: buildTalkSearchUrl(title, speaker),
+          };
+          combinedLinks.push(talkEntry);
+        }
+      }
+
+      return {
+        id: `${planId}-day-${i + 1}`,
+        dayNumber: typeof d.dayNumber === "number" ? d.dayNumber : i + 1,
+        focus: String(d.focus ?? "").slice(0, 200),
+        references: refs,
+        bigIdea: String(d.bigIdea ?? "").slice(0, 500),
+        lookFor: Array.isArray(d.lookFor) ? d.lookFor.map((l) => String(l)).filter(Boolean).slice(0, 4) : [],
+        reflection: String(d.reflection ?? "").slice(0, 300),
+        whyNext: d.whyNext != null ? String(d.whyNext).slice(0, 200) : undefined,
+        linkUrls: combinedLinks,
+      };
+    });
 
     const plan = {
       id: planId,

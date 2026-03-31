@@ -20,13 +20,15 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { StudyProgressBar } from "@/components/StudyProgressBar";
 import * as Haptics from "expo-haptics";
 import type { ScrollView as RNScrollView } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import type { StudySession, StudyMode, ChatMessage, UserProfile, StudyDepth, ChapterStudyResponse } from "@/src/core/types";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import type { StudySession, StudyMode, ChatMessage, UserProfile, StudyDepth, ChapterStudyResponse, StudyPlanDoc, StudyPlanDay } from "@/src/core/types";
 import { todayKey } from "@/src/core/dates";
 import { getJson } from "@/src/core/storage";
 import { generateStudySession, studyChat, checkApiReachability, generateChapterStudy } from "@/src/ai/apiClient";
+import { listPlans } from "@/src/study/planStorage";
 import { fallbackPlanV2, TOPIC_SUGGESTIONS } from "@/src/study/topics";
 import { ChapterPicker } from "@/src/features/study/ChapterPicker";
 import { listJournals, setJournal, listPins, setPinnedLookFor } from "@/src/study/journalStorage";
@@ -152,6 +154,8 @@ export default function StudyScreen() {
   const [apiCheckLoading, setApiCheckLoading] = useState(false);
   const [chapterStudy, setChapterStudy] = useState<ChapterStudyResponse | null>(null);
   const [chapterFromCache, setChapterFromCache] = useState(false);
+  const [activePlan, setActivePlan] = useState<StudyPlanDoc | null>(null);
+  const [activePlanDay, setActivePlanDay] = useState<StudyPlanDay | null>(null);
 
   const timerPersistRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -300,6 +304,31 @@ export default function StudyScreen() {
       setMode(modeFromDepth(depth));
     });
   }, [loadProfile, session]);
+
+  // Load active plan whenever the tab is focused.
+  useFocusEffect(
+    useCallback(() => {
+      if (session) return;
+      listPlans().then((plans) => {
+        const inProgress = plans.find((p) => {
+          const completed = p.progress?.completedDayIds ?? [];
+          return completed.length < p.days.length;
+        });
+        if (inProgress) {
+          const created = new Date(inProgress.createdAt);
+          const now = new Date();
+          const dayOffset = Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+          const dayNumber = dayOffset + 1;
+          const day = inProgress.days.find((d) => d.dayNumber === dayNumber) ?? null;
+          setActivePlan(inProgress);
+          setActivePlanDay(day);
+        } else {
+          setActivePlan(null);
+          setActivePlanDay(null);
+        }
+      }).catch(() => {});
+    }, [session])
+  );
 
   const loadResumedSession = useCallback(async () => {
     if (!sessionId) return;
@@ -569,6 +598,11 @@ export default function StudyScreen() {
     const journal = { learned: journalLearned, felt: journalFelt, action: journalAction };
     await updateSessionJournal(session.id, journal);
     setSession((prev) => (prev ? { ...prev, journal } : null));
+    // Also persist to shared journal storage so it appears in My Journal tab.
+    if (journalLearned.trim()) {
+      const refKey = `${session.topic} (${session.date})`;
+      await setJournal(refKey, journalLearned.trim()).catch(() => {});
+    }
     setSavingJournal(false);
   };
 
@@ -841,46 +875,38 @@ export default function StudyScreen() {
       contentContainerStyle={styles.setupContent}
     >
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Study session</Text>
+        <Text style={styles.title}>Study</Text>
         <View style={styles.titleActionsRow}>
           <Pressable onPress={() => router.push("/study/plans" as never)} style={styles.myJournalBtn}>
-            <Text style={styles.myJournalBtnText}>Study Plans</Text>
+            <Text style={styles.myJournalBtnText}>Plans</Text>
           </Pressable>
           <Pressable onPress={() => router.push("/study/journal")} style={styles.myJournalBtn}>
-            <Text style={styles.myJournalBtnText}>My Journal</Text>
+            <Text style={styles.myJournalBtnText}>Journal</Text>
           </Pressable>
         </View>
       </View>
-      {!process.env.EXPO_PUBLIC_API_URL?.trim() && (
-        <View style={styles.envBanner}>
-          <Text style={styles.envBannerText}>EXPO_PUBLIC_API_URL is not set. Add it to .env and run: npx expo start -c</Text>
+
+      {activePlan && activePlanDay && (
+        <View style={styles.activePlanCard}>
+          <Text style={styles.activePlanLabel}>Continue your plan</Text>
+          <Text style={styles.activePlanTitle} numberOfLines={1}>{activePlan.title}</Text>
+          <Text style={styles.activePlanFocus}>Day {activePlanDay.dayNumber}: {activePlanDay.focus}</Text>
+          {activePlanDay.references.length > 0 && (
+            <Text style={styles.activePlanRefs}>{activePlanDay.references.join(" • ")}</Text>
+          )}
+          <Pressable
+            onPress={() =>
+              router.push(`/study/plans/${activePlan.id}/day/${activePlanDay.id}` as never)
+            }
+            style={styles.activePlanBtn}
+          >
+            <Text style={styles.activePlanBtnText}>Start Plan Study →</Text>
+          </Pressable>
         </View>
       )}
-      {process.env.EXPO_PUBLIC_API_URL?.trim() && (
-        <View style={styles.apiStatusBox}>
-          <Text style={styles.apiStatusLabel}>API</Text>
-          {apiCheckLoading ? (
-            <Text style={styles.apiStatusText}>Checking…</Text>
-          ) : apiStatus ? (
-            <>
-              <Text style={styles.apiStatusUrl} numberOfLines={2}>{apiStatus.url || "(no url)"}</Text>
-              {apiStatus.ok ? (
-                <Text style={[styles.apiStatusText, styles.apiStatusOk]}>Reachable</Text>
-              ) : (
-                <>
-                  <Text style={[styles.apiStatusText, styles.apiStatusErr]}>Not reachable</Text>
-                  {apiStatus.error ? <Text style={styles.apiStatusError} numberOfLines={3}>{apiStatus.error}</Text> : null}
-                  <Text style={styles.apiStatusHint}>
-                    If you changed Vercel\u2019s repo or Root Directory, use that project\u2019s URL. Try EXPO_PUBLIC_API_PATH=root in .env if you get 404.
-                  </Text>
-                </>
-              )}
-              <Pressable onPress={runApiCheck} style={styles.apiCheckBtn} disabled={apiCheckLoading}>
-                <Text style={styles.apiCheckBtnText}>Check again</Text>
-              </Pressable>
-            </>
-          ) : null}
-        </View>
+
+      {activePlan && (
+        <Text style={styles.orLabel}>— or start a different study —</Text>
       )}
 
       <Text style={styles.label}>Study type</Text>
@@ -987,9 +1013,7 @@ export default function StudyScreen() {
           {loading && chapterRefs.length > 0 && (
             <>
               <Text style={styles.sectionTitle}>Study helps</Text>
-              <Text style={styles.helperText}>Loading…</Text>
-              <StudyCardSkeleton />
-              <StudyCardSkeleton />
+              <StudyProgressBar loading={loading} label="Building study helps…" />
             </>
           )}
           {!loading && chapterStudy && (
@@ -1173,17 +1197,14 @@ export default function StudyScreen() {
                 );
               })}
               {chapterStudy.chapters.length > 0 && (
-                <Pressable
-                  onPress={() => handleGenerateChapterStudy({ forceRefresh: true })}
-                  style={[styles.genBtn, { marginTop: 8 }]}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.genBtnText}>Regenerate</Text>
-                  )}
-                </Pressable>
+                loading
+                  ? <StudyProgressBar loading={loading} label="Regenerating study helps…" />
+                  : <Pressable
+                      onPress={() => handleGenerateChapterStudy({ forceRefresh: true })}
+                      style={[styles.genBtn, { marginTop: 8 }]}
+                    >
+                      <Text style={styles.genBtnText}>Regenerate</Text>
+                    </Pressable>
               )}
             </>
           )}
@@ -1193,9 +1214,11 @@ export default function StudyScreen() {
       {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
 
       {entryMode === "topic" && (
-        <Pressable onPress={handleStartSession} style={styles.genBtn} disabled={loading}>
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.genBtnText}>Start session</Text>}
-        </Pressable>
+        loading
+          ? <StudyProgressBar loading={loading} label="Generating your study…" />
+          : <Pressable onPress={handleStartSession} style={styles.genBtn}>
+              <Text style={styles.genBtnText}>Start session</Text>
+            </Pressable>
       )}
     </ScrollView>
   );
@@ -1211,6 +1234,26 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   title: { fontSize: 28, fontWeight: "800" },
+  activePlanCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#b8dcea",
+    backgroundColor: "#f0f9fc",
+    padding: 14,
+    marginBottom: 14,
+  },
+  activePlanLabel: { fontSize: 11, fontWeight: "700", color: "#0a7ea4", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
+  activePlanTitle: { fontSize: 12, color: "#555", marginBottom: 6 },
+  activePlanFocus: { fontSize: 15, fontWeight: "700", color: "#111", marginBottom: 4 },
+  activePlanRefs: { fontSize: 13, color: "#555", marginBottom: 10 },
+  activePlanBtn: {
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: "#0a7ea4",
+    alignItems: "center",
+  },
+  activePlanBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  orLabel: { textAlign: "center", fontSize: 13, color: "#888", marginBottom: 16 },
   titleActionsRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   myJournalBtn: {
     paddingHorizontal: 12,

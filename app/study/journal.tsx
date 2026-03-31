@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import type { StudyJournalEntry } from "@/src/core/types";
 import { listJournals } from "@/src/study/journalStorage";
 
@@ -9,24 +9,21 @@ export default function MyJournalScreen() {
   const [entries, setEntries] = useState<StudyJournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const data = await listJournals();
-        if (isMounted) {
-          setEntries(data);
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+      setLoading(true);
+      (async () => {
+        try {
+          const data = await listJournals();
+          if (isMounted) setEntries(data);
+        } finally {
+          if (isMounted) setLoading(false);
         }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    })();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+      })();
+      return () => { isMounted = false; };
+    }, [])
+  );
 
   const handleOpen = (reference: string) => {
     router.push({ pathname: "/(tabs)/study", params: { journalRef: reference } });

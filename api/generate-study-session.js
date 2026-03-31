@@ -23,6 +23,12 @@ function churchConferenceUrl() {
   return "https://www.churchofjesuschrist.org/study/general-conference?lang=eng";
 }
 
+function churchConferenceTalkUrl(title, speaker) {
+  const q = [title, speaker].filter(Boolean).join(" ").trim();
+  if (!q) return "https://www.churchofjesuschrist.org/study/general-conference?lang=eng";
+  return `https://www.churchofjesuschrist.org/search?lang=eng&query=${encodeURIComponent(q)}`;
+}
+
 function safeUrl(url, fallbackQuery) {
   if (url && typeof url === "string" && url.startsWith("http")) return url;
   const q = encodeURIComponent(fallbackQuery || "Christian resource");
@@ -56,7 +62,7 @@ export default async function handler(req, res) {
     }
     body = body || {};
 
-    const { durationMin, topic, mode, faithTradition, studyDisplayMode, studyDepth } = body;
+    const { durationMin, topic, mode, faithTradition, studyDisplayMode, studyDepth, recentlyStudied } = body;
     const validDurations = [15, 30, 60];
     const validModes = ["devotional", "deep", "challenge"];
     const displayMode = ["KEY_VERSES", "FULL_CHAPTER", "BOTH"].includes(studyDisplayMode) ? studyDisplayMode : "BOTH";
@@ -87,8 +93,15 @@ export default async function handler(req, res) {
       : "- SCRIPTURES: You MUST include 1-3 Bible scripture entries. Set source: \"BIBLE\". Use full book names in reference (e.g. \"Matthew 5\", \"Psalm 23\"). Include title, why, keyVersesSummary, background, keyVerses, crossReferences.";
 
     const talksRule = isLDS
-      ? "- TALKS: Include 0-2 General Conference talks with title, speaker, summary, officialUrl (or leave officialUrl empty)."
+      ? "- TALKS: Include 0-2 General Conference talks with title, speaker, summary. Do NOT include officialUrl — it will be generated server-side."
       : "- TALKS: Return empty array []. Do NOT include conference talks for non-LDS users.";
+
+    const recentRefs = Array.isArray(recentlyStudied) && recentlyStudied.length
+      ? recentlyStudied.slice(0, 20).map((r) => String(r).trim()).filter(Boolean)
+      : [];
+    const uniquenessRule = recentRefs.length
+      ? `- UNIQUENESS: The user has recently studied these references: ${recentRefs.join(", ")}. Do NOT reuse these exact references. Choose different chapters/books. If possible, prioritize references the user has never seen. Also ensure the ponderQuestion and lookFor are fresh and different from any generic prompts.`
+      : "- UNIQUENESS: Choose varied scriptures and a fresh, specific ponderQuestion tailored to the topic.";
 
     const system = `You generate a Christian study session plan. Return ONLY valid JSON (no markdown, no code fence).
 
@@ -113,6 +126,7 @@ ${isLDS ? '- "talks": [{"title": string, "speaker": string, "summary": string, "
 RULES:
 - User faithTradition: ${tradition}. ${scriptureSourceRule}
 ${talksRule}
+${uniquenessRule}
 - COPYRIGHT: Do NOT include full verse/chapter text for BOM, D&C, PGP, or talks. Only references, summaries, and officialUrl.
 - For Bible: ${allowFullBibleText ? "you may include a short passage if helpful." : "no full passage; use keyVersesSummary only."}`;
 
@@ -280,7 +294,20 @@ ${talksRule}
     const deepDiveRaw = src?.deepDive && typeof src.deepDive === "object" ? src.deepDive : null;
     const talksRaw = isLDS && Array.isArray(src.talks) ? src.talks : [];
     const firstTalk = talksRaw[0] && typeof talksRaw[0] === "object" ? talksRaw[0] : null;
-    const talkOfficialUrl = firstTalk?.officialUrl && String(firstTalk.officialUrl).startsWith("http") ? firstTalk.officialUrl : null;
+
+    function buildTalkEntry(t) {
+      if (!t) return undefined;
+      const title = String(t.title ?? "").trim();
+      const speaker = String(t.speaker ?? "").trim();
+      if (!title) return undefined;
+      return {
+        title,
+        speaker,
+        whyOneLine: String(t.whyOneLine ?? t.summary ?? "").trim(),
+        officialUrl: churchConferenceTalkUrl(title, speaker),
+      };
+    }
+
     const deepDive = deepDiveRaw
       ? {
           backgroundBullets: Array.isArray(deepDiveRaw.backgroundBullets)
@@ -294,38 +321,14 @@ ${talksRule}
             : undefined,
           talk:
             isLDS && deepDiveRaw.talk && typeof deepDiveRaw.talk === "object"
-              ? (() => {
-                  const t = deepDiveRaw.talk;
-                  const url = t?.officialUrl && String(t.officialUrl).startsWith("http") ? t.officialUrl : null;
-                  if (!url) return undefined;
-                  return {
-                    title: String(t?.title ?? ""),
-                    speaker: String(t?.speaker ?? ""),
-                    whyOneLine: String(t?.whyOneLine ?? ""),
-                    officialUrl: url
-                  };
-                })()
-              : (isLDS && firstTalk && talkOfficialUrl
-                  ? {
-                      title: String(firstTalk.title ?? ""),
-                      speaker: String(firstTalk.speaker ?? ""),
-                      whyOneLine: String(firstTalk.summary ?? ""),
-                      officialUrl: talkOfficialUrl
-                    }
-                  : undefined)
+              ? buildTalkEntry(deepDiveRaw.talk)
+              : (isLDS ? buildTalkEntry(firstTalk) : undefined)
         }
       : (isLDS && firstTalk
           ? {
               backgroundBullets: undefined,
               crossRefs: undefined,
-              talk: talkOfficialUrl
-                ? {
-                    title: String(firstTalk.title ?? ""),
-                    speaker: String(firstTalk.speaker ?? ""),
-                    whyOneLine: String(firstTalk.summary ?? ""),
-                    officialUrl: talkOfficialUrl
-                  }
-                : undefined
+              talk: buildTalkEntry(firstTalk)
             }
           : undefined);
 

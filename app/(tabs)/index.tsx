@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import type { FaithTradition, UserProfile, StudyDisplayMode, StudyDepth } from "@/src/core/types";
+import type { FaithTradition, UserProfile, StudyDisplayMode, StudyDepth, StudyPlanDoc, StudyPlanDay } from "@/src/core/types";
 import { getJson, setJson, removeKey } from "@/src/core/storage";
 import { Alert } from "react-native";
 import type { Habit, HabitLog, HabitSchedule } from "@/src/core/types";
@@ -25,6 +25,7 @@ import {
   getAllLogs,
   deleteHabit,
 } from "@/src/habits/habitService";
+import { listPlans } from "@/src/study/planStorage";
 
 const PROFILE_KEY = "profile:v1";
 const STUDY_SESSIONS_KEY = "studySessions:v1";
@@ -43,6 +44,15 @@ const STUDY_DEPTH_OPTIONS: { value: StudyDepth; label: string }[] = [
   { value: "DEEP_DIVE", label: "Deep Dive" },
 ];
 
+function getActivePlanDay(plan: StudyPlanDoc): StudyPlanDay | null {
+  const created = new Date(plan.createdAt);
+  const now = new Date();
+  const dayOffset = Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+  const dayNumber = dayOffset + 1;
+  if (dayNumber < 1 || dayNumber > plan.length) return null;
+  return plan.days.find((d) => d.dayNumber === dayNumber) ?? null;
+}
+
 export default function TodayScreen() {
   const router = useRouter();
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -55,13 +65,16 @@ export default function TodayScreen() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [activePlan, setActivePlan] = useState<StudyPlanDoc | null>(null);
+  const [todayPlanDay, setTodayPlanDay] = useState<StudyPlanDay | null>(null);
 
   const load = useCallback(async () => {
-    const [h, l, logs, p] = await Promise.all([
+    const [h, l, logs, p, plans] = await Promise.all([
       listHabits(),
       getTodayHabitLog(),
       getAllLogs(),
       getJson<UserProfile>(PROFILE_KEY),
+      listPlans(),
     ]);
     setHabits(h);
     setLog(l);
@@ -73,6 +86,19 @@ export default function TodayScreen() {
       studyDepth: "GUIDED",
       createdAt: new Date().toISOString(),
     });
+    // Find the most recent plan that is still in-progress.
+    const inProgress = plans.find((plan) => {
+      const completed = plan.progress?.completedDayIds ?? [];
+      return completed.length < plan.days.length;
+    });
+    if (inProgress) {
+      const day = getActivePlanDay(inProgress);
+      setActivePlan(inProgress);
+      setTodayPlanDay(day);
+    } else {
+      setActivePlan(null);
+      setTodayPlanDay(null);
+    }
   }, []);
 
   async function updateProfile(next: UserProfile) {
@@ -153,6 +179,30 @@ export default function TodayScreen() {
         data={[...dailyHabits, ...weeklyHabits].filter((h) => !h.archived)}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          activePlan && todayPlanDay ? (
+            <View style={styles.planCard}>
+              <View style={styles.planCardHeader}>
+                <Text style={styles.planCardLabel}>Today's Reading</Text>
+                <Text style={styles.planCardPlanName} numberOfLines={1}>{activePlan.title}</Text>
+              </View>
+              <Text style={styles.planCardFocus}>{todayPlanDay.focus}</Text>
+              {todayPlanDay.references.length > 0 && (
+                <Text style={styles.planCardRefs}>{todayPlanDay.references.join(" • ")}</Text>
+              )}
+              <Pressable
+                onPress={() =>
+                  router.push(
+                    `/study/plans/${activePlan.id}/day/${todayPlanDay.id}` as never
+                  )
+                }
+                style={styles.planCardBtn}
+              >
+                <Text style={styles.planCardBtnText}>Start Today's Study →</Text>
+              </Pressable>
+            </View>
+          ) : null
+        }
         renderItem={({ item }) => {
           const isDaily = item.schedule.type === "daily";
           const isDone = log?.completedHabitIds.includes(item.id) ?? false;
@@ -448,6 +498,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   addBtnText: { fontSize: 15, fontWeight: "600" },
+  planCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#b8dcea",
+    backgroundColor: "#f0f9fc",
+    padding: 14,
+    marginBottom: 14,
+  },
+  planCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  planCardLabel: { fontSize: 12, fontWeight: "700", color: "#0a7ea4", textTransform: "uppercase", letterSpacing: 0.5 },
+  planCardPlanName: { fontSize: 12, color: "#555", flexShrink: 1, maxWidth: "55%" },
+  planCardFocus: { fontSize: 15, fontWeight: "700", color: "#111", marginBottom: 4 },
+  planCardRefs: { fontSize: 13, color: "#555", marginBottom: 10 },
+  planCardBtn: {
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "#0a7ea4",
+    alignItems: "center",
+  },
+  planCardBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
   studyBtn: {
     paddingVertical: 14,
     borderRadius: 14,
