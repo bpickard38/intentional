@@ -205,6 +205,8 @@ export type StudyJournalEntry = {
   reference: string;
   text: string;
   updatedAt: string;
+  /** Scripture chapters/references that were studied in this session. */
+  chapters?: string[];
 };
 
 /** Persisted per-chapter pinned "Look for" prompts keyed by chapter reference. */

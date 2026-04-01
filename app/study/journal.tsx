@@ -26,7 +26,7 @@ export default function MyJournalScreen() {
   );
 
   const handleOpen = (reference: string) => {
-    router.push({ pathname: "/(tabs)/study", params: { journalRef: reference } });
+    router.push({ pathname: "/study/journal-detail", params: { ref: reference } });
   };
 
   return (

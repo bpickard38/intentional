@@ -601,7 +601,8 @@ export default function StudyScreen() {
     // Also persist to shared journal storage so it appears in My Journal tab.
     if (journalLearned.trim()) {
       const refKey = `${session.topic} (${session.date})`;
-      await setJournal(refKey, journalLearned.trim()).catch(() => {});
+      const chapters = (plan?.readingCards ?? []).map((c) => c.reference).filter(Boolean);
+      await setJournal(refKey, journalLearned.trim(), chapters.length ? chapters : undefined).catch(() => {});
     }
     setSavingJournal(false);
   };

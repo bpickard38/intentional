@@ -22,7 +22,7 @@ export function StudyProgressBar({ loading, label }: Props) {
       if (animRef.current) animRef.current.stop();
       animRef.current = Animated.timing(progress, {
         toValue: 0.88,
-        duration: 22000,
+        duration: 45000,
         useNativeDriver: false,
       });
       animRef.current.start();

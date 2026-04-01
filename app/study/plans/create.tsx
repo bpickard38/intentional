@@ -205,15 +205,12 @@ export default function CreatePlanScreen() {
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      <StudyProgressBar loading={loading} label="Building your plan…" />
-
-      <Pressable
-        onPress={handleGenerate}
-        disabled={loading}
-        style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]}
-      >
-        <Text style={styles.primaryBtnText}>{loading ? "Generating…" : "Generate Plan"}</Text>
-      </Pressable>
+      {loading
+        ? <StudyProgressBar loading={loading} label="Building your plan…" />
+        : <Pressable onPress={handleGenerate} style={styles.primaryBtn}>
+            <Text style={styles.primaryBtnText}>Generate Plan</Text>
+          </Pressable>
+      }
     </ScrollView>
   );
 }
@@ -273,6 +270,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#0a7ea4",
   },
-  primaryBtnDisabled: { backgroundColor: "#9ac7da" },
   primaryBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
 });

@@ -24,12 +24,18 @@ export async function getJournal(reference: string): Promise<StudyJournalEntry |
   return found ?? null;
 }
 
-export async function setJournal(reference: string, text: string): Promise<void> {
+export async function setJournal(reference: string, text: string, chapters?: string[]): Promise<void> {
   const trimmedRef = reference.trim();
   if (!trimmedRef) return;
   const now = new Date().toISOString();
   const existing = await listJournals();
-  const next: StudyJournalEntry = { reference: trimmedRef, text, updatedAt: now };
+  const prev = existing.find((e) => e.reference === trimmedRef);
+  const next: StudyJournalEntry = {
+    reference: trimmedRef,
+    text,
+    updatedAt: now,
+    chapters: chapters ?? prev?.chapters,
+  };
   const filtered = existing.filter((e) => e.reference !== trimmedRef);
   filtered.unshift(next);
   await setJson(JOURNAL_STORAGE_KEY, filtered);
