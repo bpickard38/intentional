@@ -28,6 +28,7 @@ import type { Habit, HabitLog, WeeklyReflection } from "@/src/core/types";
 import { parseDateKey, todayKey } from "@/src/core/dates";
 import { listHabits, getAllLogs } from "@/src/habits/habitService";
 import { computeAllStreaks } from "@/src/habits/streakUtils";
+import { createPathGeometry, rcx, RHW, Z0, Z_FAR } from "@/src/path/geometry";
 import { listGoals, listValues } from "@/src/goals/goalService";
 import {
   getCurrentWeekKey,
@@ -44,47 +45,10 @@ type TabName = (typeof TABS)[number];
 
 // ── First-person perspective projection ──────────────────────────────────────
 
-const SVG_W  = SCREEN_W;
-const SVG_H  = Math.min(SCREEN_H * 0.66, 510);
-const HY     = SVG_H * 0.38;          // horizon y
-const CX     = SVG_W / 2;             // center x (vanishing point)
-const Z0     = 1.5;                   // z-near (viewer's feet)
-const EH     = 1.5;                   // eye height (= Z0 so road fills bottom)
-const FL     = SVG_H - HY;            // focal length (= SVG_H*0.62)
-const Z_FAR  = 30;
-
-// Project world point (wx, wz) → screen (x, y)
-function proj(wx: number, wz: number) {
-  const s = FL / wz;
-  return { x: CX + wx * s, y: HY + EH * s };
-}
-
-// Road center S-curve: moves right then back left as depth increases
-function rcx(z: number): number {
-  return Math.sin(z * 0.25) * 2.6;
-}
-
-const RHW    = 1.05;   // road half-width in world units
-
-// Build road polygon
-function buildRoadD(N = 90): string {
-  const left: string[] = [], right: string[] = [];
-  for (let i = 0; i <= N; i++) {
-    // Log-spaced z: dense near viewer, sparse at horizon
-    const t  = i / N;
-    const wz = Z0 * Math.pow(Z_FAR / Z0, t);
-    const cx = rcx(wz);
-    const lp = proj(cx - RHW, wz);
-    const rp = proj(cx + RHW, wz);
-    left.push(`${lp.x.toFixed(1)} ${lp.y.toFixed(1)}`);
-    right.push(`${rp.x.toFixed(1)} ${rp.y.toFixed(1)}`);
-  }
-  // Left edge near→far, then right edge far→near
-  return `M ${left[0]} ` + left.slice(1).map(p => `L ${p}`).join(" ")
-       + ` L ${right[N]} ` + right.slice(0, N).reverse().map(p => `L ${p}`).join(" ")
-       + " Z";
-}
-const ROAD_D = buildRoadD();
+const SVG_W = SCREEN_W;
+const SVG_H = Math.min(SCREEN_H * 0.66, 510);
+const PATH  = createPathGeometry(SVG_W, SVG_H);
+const { HY, CX, proj, ROAD_D } = PATH;
 
 // Ground depth lines (z-indexed horizontal bands for perspective texture)
 const DEPTH_ZS = [2, 2.8, 4, 6, 9, 14, 22];
@@ -112,33 +76,15 @@ type StoneData = {
   x: number; y: number; r: number; z: number;
 };
 
-// Fixed screen-Y stepping so stones always look tightly packed
-const STONE_STEP = 32;  // pixels between stones in screen-space
-
 function buildStones(habits: Habit[], log: HabitLog | null): StoneData[] {
   const vis = habits.filter(h => !h.archived).slice(0, 11);
-  if (!vis.length) return [];
-  const yBot = SVG_H * 0.91;  // nearest stone y (near feet)
-
-  const result: StoneData[] = [];
-  for (let i = 0; i < vis.length; i++) {
-    const sy = yBot - i * STONE_STEP;
-    if (sy <= HY + 6) break;       // clip anything at/above horizon
-    const wz = EH * FL / (sy - HY);
-    const wx = rcx(wz);
-    const p  = proj(wx, wz);
-    const r  = Math.max(5, 20 * (Z0 / wz));  // min 5px so far stones are visible
-
-    result.push({
-      id: vis[i].id,
-      label: vis[i].title ?? (vis[i] as any).name,
-      completed: log?.completedHabitIds.includes(vis[i].id) ?? false,
-      x: p.x, y: sy, r, z: wz,
-    });
-  }
-  return result;
+  return PATH.layoutStones(vis.length).map((pos, i) => ({
+    ...pos,
+    id: vis[i].id,
+    label: vis[i].title ?? vis[i].name,
+    completed: log?.completedHabitIds.includes(vis[i].id) ?? false,
+  }));
 }
-
 type MilestoneData = {
   id: string; label: string; achieved: boolean;
   x: number; y: number; leftX: number; z: number;

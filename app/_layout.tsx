@@ -16,6 +16,15 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        {/* These screens render their own back button. */}
+        <Stack.Screen name="study/plans/index" options={{ headerShown: false }} />
+        <Stack.Screen name="study/plans/create" options={{ headerShown: false }} />
+        <Stack.Screen name="study/plans/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="study/plans/[id]/day/[dayId]" options={{ headerShown: false }} />
+        <Stack.Screen name="study/journal-detail" options={{ headerShown: false }} />
+        <Stack.Screen name="study/theme" options={{ headerShown: false }} />
+        <Stack.Screen name="study/journal" options={{ title: 'Journal' }} />
+        <Stack.Screen name="habits/[id]" options={{ title: 'Habit' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />

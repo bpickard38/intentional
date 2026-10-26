@@ -90,7 +90,8 @@ export function computeStreak(
       current += 1;
       if (current > best) best = current;
       lastCompletedKey = dateKey;
-    } else {
+    } else if (dateKey !== todayKey) {
+      // An unfinished today leaves the streak intact; it only breaks once the day has passed.
       current = 0;
     }
   }

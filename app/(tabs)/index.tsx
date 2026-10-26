@@ -27,6 +27,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 
 import type { Habit, HabitLog, HabitSchedule, StudyPlanDoc, StudyPlanDay } from "@/src/core/types";
+import { createPathGeometry, rcx, Z0, Z_FAR } from "@/src/path/geometry";
 import {
   listHabits,
   addHabit,
@@ -41,46 +42,10 @@ import { Palette } from "@/constants/theme";
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 // ── Perspective projection ────────────────────────────────────────────────────
-const SVG_W  = SCREEN_W;
-const SVG_H  = Math.min(SCREEN_H * 0.56, 400);
-const HY     = SVG_H * 0.38;
-const CX     = SVG_W / 2;
-const Z0     = 1.5;
-const EH     = 1.5;
-const FL     = SVG_H - HY;
-const Z_FAR  = 30;
-
-function proj(wx: number, wz: number) {
-  const s = FL / wz;
-  return { x: CX + wx * s, y: HY + EH * s };
-}
-
-function rcx(z: number): number {
-  return Math.sin(z * 0.25) * 2.6;
-}
-
-const RHW = 1.05;
-
-function buildRoadD(N = 90): string {
-  const left: string[] = [], right: string[] = [];
-  for (let i = 0; i <= N; i++) {
-    const t  = i / N;
-    const wz = Z0 * Math.pow(Z_FAR / Z0, t);
-    const cx = rcx(wz);
-    const lp = proj(cx - RHW, wz);
-    const rp = proj(cx + RHW, wz);
-    left.push(`${lp.x.toFixed(1)} ${lp.y.toFixed(1)}`);
-    right.push(`${rp.x.toFixed(1)} ${rp.y.toFixed(1)}`);
-  }
-  return (
-    `M ${left[0]} ` +
-    left.slice(1).map(p => `L ${p}`).join(" ") +
-    ` L ${right[N]} ` +
-    right.slice(0, N).reverse().map(p => `L ${p}`).join(" ") +
-    " Z"
-  );
-}
-const ROAD_D = buildRoadD();
+const SVG_W = SCREEN_W;
+const SVG_H = Math.min(SCREEN_H * 0.56, 400);
+const PATH  = createPathGeometry(SVG_W, SVG_H);
+const { HY, CX, proj, ROAD_D } = PATH;
 
 const DEPTH_ZS = [2, 2.8, 4, 6, 9, 14, 22];
 
@@ -104,30 +69,15 @@ type StoneData = {
   x: number; y: number; r: number; z: number;
 };
 
-const STONE_STEP = 32;
-
 function buildStones(habits: Habit[], log: HabitLog | null): StoneData[] {
   const vis = habits.filter(h => !h.archived).slice(0, 11);
-  if (!vis.length) return [];
-  const yBot = SVG_H * 0.91;
-  const result: StoneData[] = [];
-  for (let i = 0; i < vis.length; i++) {
-    const sy = yBot - i * STONE_STEP;
-    if (sy <= HY + 6) break;
-    const wz = EH * FL / (sy - HY);
-    const wx = rcx(wz);
-    const p  = proj(wx, wz);
-    const r  = Math.max(5, 20 * (Z0 / wz));
-    result.push({
-      id: vis[i].id,
-      label: (vis[i] as any).title ?? (vis[i] as any).name ?? "",
-      completed: log?.completedHabitIds.includes(vis[i].id) ?? false,
-      x: p.x, y: sy, r, z: wz,
-    });
-  }
-  return result;
+  return PATH.layoutStones(vis.length).map((pos, i) => ({
+    ...pos,
+    id: vis[i].id,
+    label: vis[i].title ?? vis[i].name ?? "",
+    completed: log?.completedHabitIds.includes(vis[i].id) ?? false,
+  }));
 }
-
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -263,7 +213,7 @@ export default function HomeScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 110 }}
+        contentContainerStyle={{ paddingBottom: 180 }}
       >
         {/* ── Interactive Path ── */}
         <View style={{ position: "relative" }}>
@@ -363,21 +313,32 @@ export default function HomeScreen() {
                     fill="white" textAnchor="middle" opacity={0.95}
                   >✓</SvgText>
                 )}
-                {/* Habit name label — only on larger near stones */}
-                {stone.r >= 8 && (
-                  <SvgText
-                    x={stone.x} y={stone.y + stone.r + 13}
-                    fontSize={Math.min(11, Math.max(8, stone.r * 0.62))}
-                    fill={stone.completed
-                      ? "rgba(255,213,79,0.90)"
-                      : "rgba(255,255,255,0.62)"}
-                    textAnchor="middle" fontWeight="600"
-                  >
-                    {stone.label.length > 13
-                      ? stone.label.slice(0, 12) + "…"
-                      : stone.label}
-                  </SvgText>
-                )}
+                {/* Habit name label — only on larger near stones, on a dark pill so it
+                    stays legible over the light road. Width is estimated from length. */}
+                {stone.r >= 8 && (() => {
+                  const text  = stone.label.length > 13 ? stone.label.slice(0, 12) + "…" : stone.label;
+                  const fs    = Math.min(12, Math.max(9, stone.r * 0.7));
+                  const w     = text.length * fs * 0.56 + 12;
+                  const left  = stone.x > CX;
+                  const edge  = left ? stone.x - stone.r - 6 : stone.x + stone.r + 6;
+                  return (
+                    <G>
+                      <Rect
+                        x={left ? edge - w : edge} y={stone.y - fs * 0.75 - 2}
+                        width={w} height={fs * 1.5 + 4} rx={(fs * 1.5 + 4) / 2}
+                        fill="rgba(6,12,24,0.62)"
+                      />
+                      <SvgText
+                        x={left ? edge - 6 : edge + 6} y={stone.y + fs * 0.35}
+                        fontSize={fs} fontWeight="700"
+                        fill={stone.completed ? "#ffd54f" : "rgba(255,255,255,0.92)"}
+                        textAnchor={left ? "end" : "start"}
+                      >
+                        {text}
+                      </SvgText>
+                    </G>
+                  );
+                })()}
               </G>
             ))}
 
@@ -751,7 +712,8 @@ const s = StyleSheet.create({
 
   // FAB
   fab: {
-    position: "absolute", bottom: 28, right: 24,
+    // Sits above the floating tab bar (16px offset + 64px height in (tabs)/_layout.tsx).
+    position: "absolute", bottom: 96, right: 24,
     width: 56, height: 56, borderRadius: 28,
     backgroundColor: Palette.amber500,
     alignItems: "center", justifyContent: "center",

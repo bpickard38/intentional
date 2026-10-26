@@ -57,6 +57,18 @@ describe("computeStreak", () => {
     expect(s.lastCompletedKey).toBe("2026-10-26");
   });
 
+  it("keeps the current streak while today is not yet completed", () => {
+    const logs = logsFor("h1", ["2026-10-23", "2026-10-24", "2026-10-25"]);
+    const s = computeStreak(habit(), "2026-10-26", logs);
+    expect(s.current).toBe(3);
+    expect(s.lastCompletedKey).toBe("2026-10-25");
+  });
+
+  it("breaks the streak once a full day is missed", () => {
+    const logs = logsFor("h1", ["2026-10-23", "2026-10-24"]);
+    expect(computeStreak(habit(), "2026-10-26", logs).current).toBe(0);
+  });
+
   it("resets the current streak after a missed day but keeps best", () => {
     const logs = logsFor("h1", ["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-25", "2026-10-26"]);
     const s = computeStreak(habit(), "2026-10-26", logs);

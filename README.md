@@ -11,8 +11,9 @@ Intentional helps people build daily habits and keep a consistent study practice
   <img src="docs/screenshots/insights.png" width="200" alt="Insights" />
 </p>
 
-<!-- Demo: replace with a GIF or video link -->
-<!-- ![Demo](docs/demo.gif) -->
+<p align="center">
+  <img src="docs/demo.gif" width="300" alt="Demo: checking off habits, viewing streaks, and generating an AI study session" />
+</p>
 
 ## Features
 
@@ -61,7 +62,7 @@ Intentional helps people build daily habits and keep a consistent study practice
 
 **Defensive parsing of model output.** The functions request JSON mode, then validate and normalize the shape on both server and client. Missing arrays become empty arrays, and URLs (such as links to conference talks) are generated server-side instead of trusting model-written links.
 
-**Streak logic.** `computeStreak` walks day by day from the first completion to today, so weekday-only habits don't lose their streak on days off. Tests caught a timezone bug here: `new Date("2026-10-26")` parses as *UTC* midnight, which is the previous evening in US timezones, so today's check-off never counted. Date keys are now parsed as local dates (`parseDateKey`), and the test suite runs in `America/Denver` so the bug can't come back silently.
+**Streak logic.** `computeStreak` walks day by day from the first completion to today, so weekday-only habits don't lose their streak on days off. Tests caught a timezone bug here: `new Date("2026-10-26")` parses as *UTC* midnight, which is the previous evening in US timezones, so today's check-off never counted. Date keys are now parsed as local dates (`parseDateKey`), and the test suite runs in `America/Denver` so the bug can't come back silently. A second fix keeps the streak alive while today is still unchecked; it only breaks once a whole scheduled day passes.
 
 **Protecting a public endpoint.** The API has no user accounts, so each function applies a per-IP fixed-window rate limit (`api/_lib/rateLimit.js`). OpenAI spending is also capped at the account level.
 
