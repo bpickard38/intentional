@@ -1,6 +1,8 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  FlatList,
+  Animated,
+  Dimensions,
+  Easing,
   Modal,
   Pressable,
   ScrollView,
@@ -9,314 +11,614 @@ import {
   TextInput,
   View,
 } from "react-native";
+import Svg, {
+  Circle,
+  Defs,
+  G,
+  LinearGradient,
+  Line,
+  Path as SvgPath,
+  RadialGradient,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from "react-native-svg";
 import { useFocusEffect, useRouter } from "expo-router";
-import type { FaithTradition, UserProfile, StudyDisplayMode, StudyDepth, StudyPlanDoc, StudyPlanDay } from "@/src/core/types";
-import { getJson, setJson, removeKey } from "@/src/core/storage";
-import { Alert } from "react-native";
-import type { Habit, HabitLog, HabitSchedule } from "@/src/core/types";
-import { todayKey } from "@/src/core/dates";
+import * as Haptics from "expo-haptics";
+
+import type { Habit, HabitLog, HabitSchedule, StudyPlanDoc, StudyPlanDay } from "@/src/core/types";
 import {
   listHabits,
   addHabit,
   toggleHabitCompleteToday,
   getTodayHabitLog,
   getTodayProgress,
-  getWeeklyProgress,
-  getAllLogs,
   deleteHabit,
 } from "@/src/habits/habitService";
 import { listPlans } from "@/src/study/planStorage";
+import { Palette } from "@/constants/theme";
 
-const PROFILE_KEY = "profile:v1";
-const STUDY_SESSIONS_KEY = "studySessions:v1";
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-const TRADITIONS: FaithTradition[] = [
-  "Christian", "Catholic", "Protestant", "LDS", "Other", "PreferNotToSay",
+// ── Perspective projection ────────────────────────────────────────────────────
+const SVG_W  = SCREEN_W;
+const SVG_H  = Math.min(SCREEN_H * 0.56, 400);
+const HY     = SVG_H * 0.38;
+const CX     = SVG_W / 2;
+const Z0     = 1.5;
+const EH     = 1.5;
+const FL     = SVG_H - HY;
+const Z_FAR  = 30;
+
+function proj(wx: number, wz: number) {
+  const s = FL / wz;
+  return { x: CX + wx * s, y: HY + EH * s };
+}
+
+function rcx(z: number): number {
+  return Math.sin(z * 0.25) * 2.6;
+}
+
+const RHW = 1.05;
+
+function buildRoadD(N = 90): string {
+  const left: string[] = [], right: string[] = [];
+  for (let i = 0; i <= N; i++) {
+    const t  = i / N;
+    const wz = Z0 * Math.pow(Z_FAR / Z0, t);
+    const cx = rcx(wz);
+    const lp = proj(cx - RHW, wz);
+    const rp = proj(cx + RHW, wz);
+    left.push(`${lp.x.toFixed(1)} ${lp.y.toFixed(1)}`);
+    right.push(`${rp.x.toFixed(1)} ${rp.y.toFixed(1)}`);
+  }
+  return (
+    `M ${left[0]} ` +
+    left.slice(1).map(p => `L ${p}`).join(" ") +
+    ` L ${right[N]} ` +
+    right.slice(0, N).reverse().map(p => `L ${p}`).join(" ") +
+    " Z"
+  );
+}
+const ROAD_D = buildRoadD();
+
+const DEPTH_ZS = [2, 2.8, 4, 6, 9, 14, 22];
+
+const STARS = [
+  { cx: 32,  cy: 32,  r: 1.4, o: 0.90 },
+  { cx: 88,  cy: 18,  r: 1.0, o: 0.65 },
+  { cx: 142, cy: 52,  r: 1.2, o: 0.80 },
+  { cx: 200, cy: 20,  r: 1.5, o: 0.95 },
+  { cx: 258, cy: 58,  r: 1.0, o: 0.55 },
+  { cx: 314, cy: 16,  r: 1.3, o: 0.82 },
+  { cx: 362, cy: 66,  r: 1.0, o: 0.68 },
+  { cx: 52,  cy: 92,  r: 1.0, o: 0.50 },
+  { cx: 160, cy: 86,  r: 1.2, o: 0.62 },
+  { cx: 288, cy: 80,  r: 1.0, o: 0.58 },
+  { cx: 338, cy: 110, r: 1.1, o: 0.46 },
+  { cx: 110, cy: 120, r: 1.0, o: 0.42 },
 ];
-const STUDY_DISPLAY_MODES: { value: StudyDisplayMode; label: string }[] = [
-  { value: "KEY_VERSES", label: "Key Verses" },
-  { value: "FULL_CHAPTER", label: "Full Chapter" },
-  { value: "BOTH", label: "Both" },
-];
-const STUDY_DEPTH_OPTIONS: { value: StudyDepth; label: string }[] = [
-  { value: "QUICK", label: "Quick" },
-  { value: "GUIDED", label: "Guided" },
-  { value: "DEEP_DIVE", label: "Deep Dive" },
-];
+
+type StoneData = {
+  id: string; label: string; completed: boolean;
+  x: number; y: number; r: number; z: number;
+};
+
+const STONE_STEP = 32;
+
+function buildStones(habits: Habit[], log: HabitLog | null): StoneData[] {
+  const vis = habits.filter(h => !h.archived).slice(0, 11);
+  if (!vis.length) return [];
+  const yBot = SVG_H * 0.91;
+  const result: StoneData[] = [];
+  for (let i = 0; i < vis.length; i++) {
+    const sy = yBot - i * STONE_STEP;
+    if (sy <= HY + 6) break;
+    const wz = EH * FL / (sy - HY);
+    const wx = rcx(wz);
+    const p  = proj(wx, wz);
+    const r  = Math.max(5, 20 * (Z0 / wz));
+    result.push({
+      id: vis[i].id,
+      label: (vis[i] as any).title ?? (vis[i] as any).name ?? "",
+      completed: log?.completedHabitIds.includes(vis[i].id) ?? false,
+      x: p.x, y: sy, r, z: wz,
+    });
+  }
+  return result;
+}
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+const DAYS   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function getDateLabel(): string {
+  const d = new Date();
+  return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
 
 function getActivePlanDay(plan: StudyPlanDoc): StudyPlanDay | null {
-  const created = new Date(plan.createdAt);
-  const now = new Date();
+  const created   = new Date(plan.createdAt);
+  const now       = new Date();
   const dayOffset = Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
   const dayNumber = dayOffset + 1;
   if (dayNumber < 1 || dayNumber > plan.length) return null;
-  return plan.days.find((d) => d.dayNumber === dayNumber) ?? null;
+  return plan.days.find(d => d.dayNumber === dayNumber) ?? null;
 }
 
-export default function TodayScreen() {
+// ── Home screen ───────────────────────────────────────────────────────────────
+export default function HomeScreen() {
   const router = useRouter();
-  const [habits, setHabits] = useState<Habit[]>([]);
-  const [log, setLog] = useState<HabitLog | null>(null);
-  const [allLogs, setAllLogs] = useState<HabitLog[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [scheduleType, setScheduleType] = useState<"daily" | "weekly">("daily");
-  const [targetPerWeek, setTargetPerWeek] = useState("3");
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [settingsVisible, setSettingsVisible] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [activePlan, setActivePlan] = useState<StudyPlanDoc | null>(null);
-  const [todayPlanDay, setTodayPlanDay] = useState<StudyPlanDay | null>(null);
+
+  const [habits,       setHabits]       = useState<Habit[]>([]);
+  const [log,          setLog]          = useState<HabitLog | null>(null);
+  const [addVisible,   setAddVisible]   = useState(false);
+  const [newName,      setNewName]      = useState("");
+  const [schedType,    setSchedType]    = useState<"daily" | "weekly">("daily");
+  const [targetPerWk,  setTargetPerWk]  = useState("3");
+  const [deleteId,     setDeleteId]     = useState<string | null>(null);
+  const [activePlan,   setActivePlan]   = useState<StudyPlanDoc | null>(null);
+  const [todayDay,     setTodayDay]     = useState<StudyPlanDay | null>(null);
+  const [listExpanded, setListExpanded] = useState(false);
+
+  // Stone tap ripple animation
+  const rippleScale   = useRef(new Animated.Value(0)).current;
+  const rippleOpacity = useRef(new Animated.Value(0)).current;
+  const [ripplePos, setRipplePos] = useState<{ x: number; y: number; r: number } | null>(null);
 
   const load = useCallback(async () => {
-    const [h, l, logs, p, plans] = await Promise.all([
+    const [h, l, plans] = await Promise.all([
       listHabits(),
       getTodayHabitLog(),
-      getAllLogs(),
-      getJson<UserProfile>(PROFILE_KEY),
       listPlans(),
     ]);
     setHabits(h);
     setLog(l);
-    setAllLogs(logs);
-    setProfile(p ?? {
-      id: "default",
-      faithTradition: "Christian",
-      studyDisplayMode: "BOTH",
-      studyDepth: "GUIDED",
-      createdAt: new Date().toISOString(),
-    });
-    // Find the most recent plan that is still in-progress.
-    const inProgress = plans.find((plan) => {
-      const completed = plan.progress?.completedDayIds ?? [];
-      return completed.length < plan.days.length;
+    const inProgress = plans.find(plan => {
+      const done = plan.progress?.completedDayIds ?? [];
+      return done.length < plan.days.length;
     });
     if (inProgress) {
-      const day = getActivePlanDay(inProgress);
       setActivePlan(inProgress);
-      setTodayPlanDay(day);
+      setTodayDay(getActivePlanDay(inProgress));
     } else {
       setActivePlan(null);
-      setTodayPlanDay(null);
+      setTodayDay(null);
     }
   }, []);
 
-  async function updateProfile(next: UserProfile) {
-    await setJson(PROFILE_KEY, next);
-    setProfile(next);
-  }
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load])
-  );
+  const activeHabits = habits.filter(h => !h.archived);
+  const progress     = log ? getTodayProgress(habits, log) : { done: 0, total: 0, percent: 0 };
+  const prog         = progress.total > 0 ? progress.done / progress.total : 0;
+  const allDone      = progress.total > 0 && progress.done === progress.total;
 
-  const progress = log ? getTodayProgress(habits, log) : { done: 0, total: 0, percent: 0 };
-  const weekly = getWeeklyProgress(habits, allLogs);
+  const stones = buildStones(activeHabits, log);
+  const sorted = [...stones].sort((a, b) => b.z - a.z);
 
-  async function toggle(habitId: string) {
+  // Sun glow pulse
+  const glow = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, { toValue: 1, duration: 2400, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0, duration: 2400, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+  }, [glow]);
+
+  const glowOp = glow.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0.58] });
+  const glowSc = glow.interpolate({ inputRange: [0, 1], outputRange: [1.0, 1.22] });
+  const sunX = CX, sunY = HY;
+
+  async function handleStoneTap(habitId: string) {
+    // Ripple animation at stone position
+    const tapped = stones.find(s => s.id === habitId);
+    if (tapped) {
+      setRipplePos({ x: tapped.x, y: tapped.y, r: Math.max(tapped.r, 12) });
+      rippleScale.setValue(0.6);
+      rippleOpacity.setValue(0.85);
+      Animated.parallel([
+        Animated.timing(rippleScale, { toValue: 3.2, duration: 420, useNativeDriver: true }),
+        Animated.timing(rippleOpacity, { toValue: 0, duration: 420, useNativeDriver: true }),
+      ]).start(() => setRipplePos(null));
+    }
+    try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
     const updated = await toggleHabitCompleteToday(habitId);
     setLog(updated);
-    const logs = await getAllLogs();
-    setAllLogs(logs);
+    const nowAllDone = activeHabits.length > 0 &&
+      activeHabits.every(h => updated.completedHabitIds.includes(h.id));
+    if (nowAllDone) {
+      try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    }
   }
 
   async function handleAddHabit() {
     const name = newName.trim();
     if (!name) return;
     const schedule: HabitSchedule =
-      scheduleType === "daily"
+      schedType === "daily"
         ? { type: "daily" }
-        : { type: "weekly", targetPerWeek: Math.max(1, parseInt(targetPerWeek, 10) || 3) };
+        : { type: "weekly", targetPerWeek: Math.max(1, parseInt(targetPerWk, 10) || 3) };
     await addHabit(name, schedule);
     setNewName("");
-    setScheduleType("daily");
-    setTargetPerWeek("3");
-    setModalVisible(false);
+    setSchedType("daily");
+    setTargetPerWk("3");
+    setAddVisible(false);
     load();
   }
 
-  const dailyHabits = habits.filter((h) => h.schedule.type === "daily");
-  const weeklyHabits = habits.filter((h) => h.schedule.type === "weekly");
-
-  function getWeeklyCountForHabit(habitId: string): number {
-    const key = todayKey();
-    return allLogs.filter((l) => {
-      const a = new Date(l.date);
-      const b = new Date(key);
-      const startA = new Date(a);
-      startA.setDate(a.getDate() - a.getDay());
-      const startB = new Date(b);
-      startB.setDate(b.getDate() - b.getDay());
-      return startA.getTime() === startB.getTime() && l.completedHabitIds.includes(habitId);
-    }).length;
-  }
-
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>Today</Text>
-        <Pressable onPress={() => setSettingsVisible(true)} style={styles.settingsBtn}>
-          <Text style={styles.settingsIcon}>⚙️</Text>
-        </Pressable>
+    <View style={s.screen}>
+      {/* ── Header ── */}
+      <View style={s.header}>
+        <Text style={s.dateLabel}>{getDateLabel()}</Text>
+        {progress.total > 0 && (
+          <Text style={[s.progressBadge, allDone && s.progressBadgeDone]}>
+            {progress.done}/{progress.total}{allDone ? " 🎉" : ""}
+          </Text>
+        )}
       </View>
 
-      <View style={styles.progressRow}>
-        <Text style={styles.progressText}>
-          {progress.done}/{progress.total} done
-          {progress.total > 0 ? ` • ${progress.percent}%` : ""}
-        </Text>
-      </View>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 110 }}
+      >
+        {/* ── Interactive Path ── */}
+        <View style={{ position: "relative" }}>
+          <Svg width={SVG_W} height={SVG_H}>
+            <Defs>
+              <LinearGradient id="hsky" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0"    stopColor="#020912" />
+                <Stop offset="0.75" stopColor="#091828" />
+                <Stop offset="1"    stopColor="#0f2240" />
+              </LinearGradient>
+              <LinearGradient id="hground" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor="#6b4e20" />
+                <Stop offset="1" stopColor="#b8882e" />
+              </LinearGradient>
+              <LinearGradient id="hroad" x1="0.5" y1="0" x2="0.5" y2="1">
+                <Stop offset="0"   stopColor="#cfc4a4" />
+                <Stop offset="0.4" stopColor="#ede3c8" />
+                <Stop offset="1"   stopColor="#f8f0d8" />
+              </LinearGradient>
+              <RadialGradient id="hsun" cx="50%" cy="50%" r="50%">
+                <Stop offset="0"    stopColor="#fff176" stopOpacity="1"    />
+                <Stop offset="0.35" stopColor="#ffd740" stopOpacity="0.85" />
+                <Stop offset="0.65" stopColor="#f5a020" stopOpacity="0.40" />
+                <Stop offset="1"    stopColor="#c05000" stopOpacity="0"    />
+              </RadialGradient>
+              <RadialGradient id="hhalo" cx="50%" cy="50%" r="50%">
+                <Stop offset="0" stopColor="#ffd54f" stopOpacity="0.55" />
+                <Stop offset="1" stopColor="#ffd54f" stopOpacity="0"    />
+              </RadialGradient>
+              <RadialGradient id="hvignette" cx="50%" cy="50%" r="65%">
+                <Stop offset="0" stopColor="#000" stopOpacity="0"    />
+                <Stop offset="1" stopColor="#000" stopOpacity="0.52" />
+              </RadialGradient>
+            </Defs>
 
-      {weekly.targetThisWeek > 0 && (
-        <Text style={styles.weeklyText}>
-          Weekly: {weekly.doneThisWeek}/{weekly.targetThisWeek}
-        </Text>
-      )}
+            {/* Sky */}
+            <Rect x="0" y="0" width={SVG_W} height={HY + 2} fill="url(#hsky)" />
 
-      <FlatList
-        data={[...dailyHabits, ...weeklyHabits].filter((h) => !h.archived)}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={
-          activePlan && todayPlanDay ? (
-            <View style={styles.planCard}>
-              <View style={styles.planCardHeader}>
-                <Text style={styles.planCardLabel}>Today's Reading</Text>
-                <Text style={styles.planCardPlanName} numberOfLines={1}>{activePlan.title}</Text>
-              </View>
-              <Text style={styles.planCardFocus}>{todayPlanDay.focus}</Text>
-              {todayPlanDay.references.length > 0 && (
-                <Text style={styles.planCardRefs}>{todayPlanDay.references.join(" • ")}</Text>
-              )}
+            {/* Stars */}
+            {STARS.map((st, i) => (
+              <Circle key={i} cx={st.cx} cy={st.cy} r={st.r} fill="white" opacity={st.o} />
+            ))}
+
+            {/* Ground */}
+            <Rect x="0" y={HY} width={SVG_W} height={SVG_H - HY} fill="url(#hground)" />
+
+            {/* Depth lines */}
+            {DEPTH_ZS.map((wz, i) => {
+              const y = proj(0, wz).y;
+              if (y < HY || y > SVG_H) return null;
+              return (
+                <Line key={i} x1={0} y1={y} x2={SVG_W} y2={y}
+                  stroke="#7a5818" strokeWidth={0.6} opacity={0.30} />
+              );
+            })}
+
+            {/* Road */}
+            <SvgPath d={ROAD_D} fill="#1a1206" opacity={0.28} />
+            <SvgPath d={ROAD_D} fill="url(#hroad)" />
+
+            {/* Road center dashes */}
+            {Array.from({ length: 14 }, (_, i) => {
+              const t  = (i + 0.5) / 14;
+              const wz = Z0 * Math.pow(Z_FAR / Z0, t);
+              const p  = proj(rcx(wz), wz);
+              const sz = Math.max(1.5, 8 * (Z0 / wz));
+              return p.y >= HY && p.y <= SVG_H ? (
+                <Rect key={i}
+                  x={p.x - sz * 0.3} y={p.y - sz}
+                  width={sz * 0.6} height={sz * 2}
+                  fill="#c0a870" opacity={0.4} rx={sz * 0.3}
+                />
+              ) : null;
+            })}
+
+            {/* Stones — far → near for correct z-order */}
+            {sorted.map(stone => (
+              <G key={stone.id}>
+                {stone.completed && (
+                  <Circle cx={stone.x} cy={stone.y} r={stone.r * 2.2} fill="url(#hhalo)" />
+                )}
+                {/* Shadow */}
+                <Circle cx={stone.x} cy={stone.y + stone.r * 0.4} r={stone.r * 1.1}
+                  fill="#000" opacity={0.22} />
+                {/* Body */}
+                <Circle
+                  cx={stone.x} cy={stone.y} r={stone.r}
+                  fill={stone.completed ? "#f5a623" : "rgba(255,255,255,0.12)"}
+                  stroke={stone.completed ? "#ffd54f" : "rgba(255,255,255,0.42)"}
+                  strokeWidth={stone.r > 6 ? 1.5 : 1}
+                />
+                {/* Check mark */}
+                {stone.completed && stone.r >= 5 && (
+                  <SvgText
+                    x={stone.x} y={stone.y + stone.r * 0.38}
+                    fontSize={stone.r * 1.1} fontWeight="900"
+                    fill="white" textAnchor="middle" opacity={0.95}
+                  >✓</SvgText>
+                )}
+                {/* Habit name label — only on larger near stones */}
+                {stone.r >= 8 && (
+                  <SvgText
+                    x={stone.x} y={stone.y + stone.r + 13}
+                    fontSize={Math.min(11, Math.max(8, stone.r * 0.62))}
+                    fill={stone.completed
+                      ? "rgba(255,213,79,0.90)"
+                      : "rgba(255,255,255,0.62)"}
+                    textAnchor="middle" fontWeight="600"
+                  >
+                    {stone.label.length > 13
+                      ? stone.label.slice(0, 12) + "…"
+                      : stone.label}
+                  </SvgText>
+                )}
+              </G>
+            ))}
+
+            {/* Sun */}
+            <Circle cx={sunX} cy={sunY} r={60} fill="url(#hsun)"
+              opacity={0.28 + prog * 0.42} />
+            <Circle cx={sunX} cy={sunY} r={38} fill="url(#hsun)"
+              opacity={0.48 + prog * 0.28} />
+            <Circle cx={sunX} cy={sunY} r={16} fill="#ffd740" opacity={0.92} />
+            <Circle cx={sunX} cy={sunY} r={10} fill="#fff176" />
+            <Circle cx={sunX} cy={sunY} r={5}  fill="white" opacity={0.60} />
+
+            {/* Horizon glow */}
+            <Rect x={sunX - 100} y={HY - 6} width={200} height={14}
+              fill="#f5a820" opacity={0.10 + prog * 0.18} rx={7} />
+
+            {/* Vignette */}
+            <Rect x="0" y="0" width={SVG_W} height={SVG_H} fill="url(#hvignette)" />
+
+            {/* YOUR GOAL label */}
+            <SvgText x={sunX} y={HY - 26} fontSize={9} fontWeight="600"
+              fill="rgba(255,221,74,0.60)" textAnchor="middle" letterSpacing={2}>
+              YOUR GOAL
+            </SvgText>
+
+            {/* Empty state hint */}
+            {activeHabits.length === 0 && (
+              <SvgText x={CX} y={SVG_H * 0.74} fontSize={13}
+                fill="rgba(255,255,255,0.40)" textAnchor="middle" fontWeight="600">
+                Tap + to add your first habit
+              </SvgText>
+            )}
+          </Svg>
+
+          {/* Animated sun glow (RN layer — outside SVG) */}
+          <Animated.View
+            pointerEvents="none"
+            style={[s.sunGlow, {
+              left: sunX - 72, top: sunY - 72,
+              opacity: glowOp, transform: [{ scale: glowSc }],
+            }]}
+          />
+
+          {/* Invisible touch targets over each stone */}
+          {stones.map(stone => {
+            const hitR = Math.max(22, stone.r + 12);
+            return (
               <Pressable
-                onPress={() =>
-                  router.push(
-                    `/study/plans/${activePlan.id}/day/${todayPlanDay.id}` as never
-                  )
-                }
-                style={styles.planCardBtn}
-              >
-                <Text style={styles.planCardBtnText}>Start Today's Study →</Text>
-              </Pressable>
-            </View>
-          ) : null
-        }
-        renderItem={({ item }) => {
-          const isDaily = item.schedule.type === "daily";
-          const isDone = log?.completedHabitIds.includes(item.id) ?? false;
-          const weeklyCount = !isDaily && item.schedule.type === "weekly"
-            ? getWeeklyCountForHabit(item.id)
-            : 0;
-          const weeklyTarget = !isDaily && item.schedule.type === "weekly"
-            ? item.schedule.targetPerWeek ?? 0
-            : 0;
-          return (
-            <Pressable
-              onPress={() => toggle(item.id)}
-              style={[styles.card, isDone && styles.cardDone]}
-            >
-              <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
-                {isDone ? <Text style={styles.check}>✓</Text> : null}
-              </View>
-              <View style={styles.habitLabelRow}>
-                <View style={styles.habitLabelMain}>
-                  <Text style={[styles.itemText, isDone && styles.itemTextDone]}>
-                    {item.title ?? item.name}
-                  </Text>
-                  {!isDaily && weeklyTarget > 0 ? (
-                    <Text style={styles.weeklyBadge}>
-                      {weeklyCount}/{weeklyTarget} this week
-                    </Text>
-                  ) : null}
-                </View>
-                <Pressable
-                  onPress={() => setDeleteId(item.id)}
-                  style={styles.deleteBtn}
-                >
-                  <Text style={styles.deleteBtnText}>Delete</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          );
-        }}
-      />
+                key={stone.id}
+                onPress={() => handleStoneTap(stone.id)}
+                style={{
+                  position: "absolute",
+                  left:   stone.x - hitR,
+                  top:    stone.y - hitR,
+                  width:  hitR * 2,
+                  height: hitR * 2,
+                  borderRadius: hitR,
+                }}
+              />
+            );
+          })}
 
-      <Pressable onPress={() => setModalVisible(true)} style={styles.addBtn}>
-        <Text style={styles.addBtnText}>Add habit</Text>
+          {/* Ripple ring feedback on stone tap */}
+          {ripplePos && (
+            <Animated.View
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                left: ripplePos.x - ripplePos.r * 1.5,
+                top:  ripplePos.y - ripplePos.r * 1.5,
+                width:  ripplePos.r * 3,
+                height: ripplePos.r * 3,
+                borderRadius: ripplePos.r * 1.5,
+                borderWidth: 2,
+                borderColor: Palette.amber400,
+                opacity: rippleOpacity,
+                transform: [{ scale: rippleScale }],
+              }}
+            />
+          )}
+        </View>
+
+        {/* ── Progress bar ── */}
+        <View style={s.progressBar}>
+          <Text style={s.progressBarLabel}>
+            {progress.total === 0
+              ? "Add habits to begin your journey"
+              : allDone
+              ? "All steps complete — amazing work!"
+              : `${progress.done} of ${progress.total} ${progress.total === 1 ? "step" : "steps"} today`}
+          </Text>
+          {progress.total > 0 && (
+            <View style={s.track}>
+              <View style={[s.fill, { width: `${Math.round(prog * 100)}%` as any },
+                allDone && s.fillDone]} />
+            </View>
+          )}
+        </View>
+
+        {/* ── Today's Reading plan card ── */}
+        {activePlan && todayDay && (
+          <View style={s.planCard}>
+            <View style={s.planCardHeader}>
+              <Text style={s.planCardLabel}>TODAY&apos;S READING</Text>
+              <Text style={s.planCardName} numberOfLines={1}>{activePlan.title}</Text>
+            </View>
+            <Text style={s.planCardFocus}>{todayDay.focus}</Text>
+            {todayDay.references.length > 0 && (
+              <Text style={s.planCardRefs}>{todayDay.references.join(" • ")}</Text>
+            )}
+            <Pressable
+              onPress={() =>
+                router.push(`/study/plans/${activePlan.id}/day/${todayDay.id}` as never)
+              }
+              style={s.planCardBtn}
+            >
+              <Text style={s.planCardBtnText}>Start Today&apos;s Study →</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── Habit list (expandable) ── */}
+        {activeHabits.length > 0 && (
+          <View style={s.listSection}>
+            <Pressable
+              onPress={() => setListExpanded(e => !e)}
+              style={s.listToggle}
+            >
+              <Text style={s.listToggleLabel}>HABITS</Text>
+              <Text style={s.listToggleChevron}>{listExpanded ? "▲" : "▼"}</Text>
+            </Pressable>
+            {listExpanded && activeHabits.map(habit => {
+              const isDone = log?.completedHabitIds.includes(habit.id) ?? false;
+              const name   = (habit as any).title ?? (habit as any).name ?? "";
+              return (
+                <Pressable
+                  key={habit.id}
+                  onPress={() => handleStoneTap(habit.id)}
+                  style={[s.habitRow, isDone && s.habitRowDone]}
+                >
+                  <View style={[s.habitCircle, isDone && s.habitCircleDone]}>
+                    {isDone && <Text style={s.habitCircleCheck}>✓</Text>}
+                  </View>
+                  <Text style={[s.habitName, isDone && s.habitNameDone]} numberOfLines={1}>
+                    {name}
+                  </Text>
+                  <Pressable
+                    onPress={() => setDeleteId(habit.id)}
+                    hitSlop={8}
+                    style={s.habitDeleteBtn}
+                  >
+                    <Text style={s.habitDeleteText}>✕</Text>
+                  </Pressable>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* ── FAB ── */}
+      <Pressable onPress={() => setAddVisible(true)} style={s.fab}>
+        <Text style={s.fabText}>+</Text>
       </Pressable>
 
+      {/* ── Add habit modal ── */}
       <Modal
-        visible={modalVisible}
+        visible={addVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => setAddVisible(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setModalVisible(false)}>
-          <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>New habit</Text>
+        <Pressable style={s.overlay} onPress={() => setAddVisible(false)}>
+          <Pressable style={s.modalBox} onPress={e => e.stopPropagation()}>
+            <Text style={s.modalTitle}>New Habit</Text>
             <TextInput
-              style={styles.input}
+              style={s.input}
               placeholder="Habit name"
+              placeholderTextColor="rgba(255,255,255,0.30)"
               value={newName}
               onChangeText={setNewName}
               autoCapitalize="words"
+              returnKeyType="done"
+              onSubmitEditing={handleAddHabit}
             />
-            <View style={styles.scheduleRow}>
+            <View style={s.schedRow}>
               <Pressable
-                onPress={() => setScheduleType("daily")}
-                style={[styles.scheduleBtn, scheduleType === "daily" && styles.scheduleBtnActive]}
+                onPress={() => setSchedType("daily")}
+                style={[s.schedBtn, schedType === "daily" && s.schedBtnActive]}
               >
-                <Text style={scheduleType === "daily" ? styles.scheduleBtnTextActive : undefined}>
+                <Text style={[s.schedBtnText, schedType === "daily" && s.schedBtnTextActive]}>
                   Daily
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => setScheduleType("weekly")}
-                style={[styles.scheduleBtn, scheduleType === "weekly" && styles.scheduleBtnActive]}
+                onPress={() => setSchedType("weekly")}
+                style={[s.schedBtn, schedType === "weekly" && s.schedBtnActive]}
               >
-                <Text style={scheduleType === "weekly" ? styles.scheduleBtnTextActive : undefined}>
+                <Text style={[s.schedBtnText, schedType === "weekly" && s.schedBtnTextActive]}>
                   Weekly
                 </Text>
               </Pressable>
             </View>
-            {scheduleType === "weekly" && (
+            {schedType === "weekly" && (
               <TextInput
-                style={styles.input}
-                placeholder="Target per week (e.g. 3)"
-                value={targetPerWeek}
-                onChangeText={setTargetPerWeek}
+                style={s.input}
+                placeholder="Times per week (e.g. 3)"
+                placeholderTextColor="rgba(255,255,255,0.30)"
+                value={targetPerWk}
+                onChangeText={setTargetPerWk}
                 keyboardType="number-pad"
               />
             )}
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => setModalVisible(false)} style={styles.cancelBtn}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+            <View style={s.modalActions}>
+              <Pressable onPress={() => setAddVisible(false)} style={s.cancelBtn}>
+                <Text style={s.cancelText}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={handleAddHabit} style={styles.saveBtn}>
-                <Text style={styles.saveBtnText}>Save</Text>
+              <Pressable onPress={handleAddHabit} style={s.saveBtn}>
+                <Text style={s.saveBtnText}>Add</Text>
               </Pressable>
             </View>
           </Pressable>
         </Pressable>
       </Modal>
 
+      {/* ── Delete confirm modal ── */}
       <Modal
         visible={deleteId != null}
         transparent
         animationType="fade"
         onRequestClose={() => setDeleteId(null)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setDeleteId(null)}>
-          <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Delete habit?</Text>
-            <Text style={styles.deleteWarningText}>
-              This will remove its streak history for all days.
+        <Pressable style={s.overlay} onPress={() => setDeleteId(null)}>
+          <Pressable style={s.modalBox} onPress={e => e.stopPropagation()}>
+            <Text style={s.modalTitle}>Delete habit?</Text>
+            <Text style={s.deleteWarning}>
+              This will remove all streak history for this habit.
             </Text>
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => setDeleteId(null)} style={styles.cancelBtn}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+            <View style={s.modalActions}>
+              <Pressable onPress={() => setDeleteId(null)} style={s.cancelBtn}>
+                <Text style={s.cancelText}>Cancel</Text>
               </Pressable>
               <Pressable
                 onPress={async () => {
@@ -325,243 +627,184 @@ export default function TodayScreen() {
                   setDeleteId(null);
                   load();
                 }}
-                style={styles.deleteConfirmBtn}
+                style={s.deleteBtn}
               >
-                <Text style={styles.deleteConfirmText}>Delete</Text>
+                <Text style={s.deleteBtnText}>Delete</Text>
               </Pressable>
             </View>
           </Pressable>
         </Pressable>
       </Modal>
-
-      {/* Settings modal */}
-      <Modal
-        visible={settingsVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setSettingsVisible(false)}
-      >
-        <ScrollView style={settingsStyles.scroll} contentContainerStyle={settingsStyles.container}>
-          <View style={settingsStyles.headerRow}>
-            <Text style={settingsStyles.title}>Settings</Text>
-            <Pressable onPress={() => setSettingsVisible(false)} style={settingsStyles.closeBtn}>
-              <Text style={settingsStyles.closeBtnText}>Done</Text>
-            </Pressable>
-          </View>
-
-          {profile && (
-            <>
-              <Text style={settingsStyles.label}>Faith tradition</Text>
-              <View style={settingsStyles.options}>
-                {TRADITIONS.map((t) => (
-                  <Pressable
-                    key={t}
-                    onPress={() => updateProfile({ ...profile, faithTradition: t })}
-                    style={[settingsStyles.optionBtn, profile.faithTradition === t && settingsStyles.optionBtnActive]}
-                  >
-                    <Text style={[settingsStyles.optionText, profile.faithTradition === t && settingsStyles.optionTextActive]}>
-                      {t}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={settingsStyles.label}>Study mode</Text>
-              <View style={settingsStyles.options}>
-                {STUDY_DISPLAY_MODES.map(({ value, label }) => (
-                  <Pressable
-                    key={value}
-                    onPress={() => updateProfile({ ...profile, studyDisplayMode: value })}
-                    style={[settingsStyles.optionBtn, (profile.studyDisplayMode ?? "BOTH") === value && settingsStyles.optionBtnActive]}
-                  >
-                    <Text style={[settingsStyles.optionText, (profile.studyDisplayMode ?? "BOTH") === value && settingsStyles.optionTextActive]}>
-                      {label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={settingsStyles.label}>Study depth</Text>
-              <View style={settingsStyles.options}>
-                {STUDY_DEPTH_OPTIONS.map(({ value, label }) => (
-                  <Pressable
-                    key={value}
-                    onPress={() => updateProfile({ ...profile, studyDepth: value })}
-                    style={[settingsStyles.optionBtn, (profile.studyDepth ?? "GUIDED") === value && settingsStyles.optionBtnActive]}
-                  >
-                    <Text style={[settingsStyles.optionText, (profile.studyDepth ?? "GUIDED") === value && settingsStyles.optionTextActive]}>
-                      {label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </>
-          )}
-
-          <View style={settingsStyles.debugRow}>
-            <Text style={settingsStyles.debugLabel}>API</Text>
-            <Text style={settingsStyles.debugValue} numberOfLines={1}>
-              {process.env.EXPO_PUBLIC_API_URL?.trim() || "(not set)"}
-            </Text>
-          </View>
-
-          <Pressable
-            onPress={() => {
-              Alert.alert("Reset Study Data", "This will delete all study sessions. Continue?", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Reset", style: "destructive", onPress: async () => { await removeKey(STUDY_SESSIONS_KEY); } },
-              ]);
-            }}
-            style={settingsStyles.resetBtn}
-          >
-            <Text style={settingsStyles.resetBtnText}>Reset study data</Text>
-          </Pressable>
-        </ScrollView>
-      </Modal>
     </View>
   );
 }
 
-const settingsStyles = StyleSheet.create({
-  scroll: { flex: 1 },
-  container: { padding: 20, paddingTop: 24, paddingBottom: 40, backgroundColor: "#fff" },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 24 },
-  title: { fontSize: 28, fontWeight: "800" },
-  closeBtn: { paddingHorizontal: 12, paddingVertical: 6 },
-  closeBtnText: { fontSize: 17, fontWeight: "600", color: "#0a7ea4" },
-  label: { fontSize: 16, fontWeight: "600", marginBottom: 12, marginTop: 20 },
-  options: { gap: 10 },
-  optionBtn: { paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: "#ddd" },
-  optionBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  optionText: { fontSize: 16 },
-  optionTextActive: { fontWeight: "700", color: "#0a7ea4" },
-  debugRow: { marginTop: 24, padding: 12, backgroundColor: "#f5f5f5", borderRadius: 8 },
-  debugLabel: { fontSize: 12, fontWeight: "600", color: "#666", marginBottom: 4 },
-  debugValue: { fontSize: 13, color: "#333" },
-  resetBtn: { marginTop: 16, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: "#dc3545", alignItems: "center" },
-  resetBtnText: { fontSize: 16, fontWeight: "600", color: "#dc3545" },
-});
+const s = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: Palette.navy800 },
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 48, backgroundColor: "#fff" },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
-  title: { fontSize: 28, fontWeight: "800" },
-  settingsBtn: { padding: 6 },
-  settingsIcon: { fontSize: 22 },
-  progressRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  progressText: { fontSize: 16, fontWeight: "600" },
-  weeklyText: { fontSize: 14, color: "#666", marginBottom: 12 },
-  listContent: { paddingBottom: 16 },
-  card: {
+  // Header
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#eee",
-    marginBottom: 10,
-  },
-  cardDone: { borderColor: "#cfc" },
-  checkbox: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#bbb",
-    marginRight: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkboxDone: { borderColor: "#2b8a3e" },
-  check: { fontSize: 16, fontWeight: "900" },
-  itemText: { fontSize: 16, fontWeight: "600" },
-  itemTextDone: { textDecorationLine: "line-through", opacity: 0.6 },
-  habitLabelRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  habitLabelMain: { flexShrink: 1 },
-  weeklyBadge: { fontSize: 12, color: "#666", marginTop: 2 },
-  deleteBtn: {
-    marginLeft: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#f5c2c7",
-    backgroundColor: "#fff5f5",
-  },
-  deleteBtnText: { fontSize: 12, fontWeight: "600", color: "#b02a37" },
-  addBtn: {
-    paddingVertical: 10,
-    marginBottom: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    alignItems: "center",
-  },
-  addBtnText: { fontSize: 15, fontWeight: "600" },
-  planCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#b8dcea",
-    backgroundColor: "#f0f9fc",
-    padding: 14,
-    marginBottom: 14,
-  },
-  planCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  planCardLabel: { fontSize: 12, fontWeight: "700", color: "#0a7ea4", textTransform: "uppercase", letterSpacing: 0.5 },
-  planCardPlanName: { fontSize: 12, color: "#555", flexShrink: 1, maxWidth: "55%" },
-  planCardFocus: { fontSize: 15, fontWeight: "700", color: "#111", marginBottom: 4 },
-  planCardRefs: { fontSize: 13, color: "#555", marginBottom: 10 },
-  planCardBtn: {
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: "#0a7ea4",
-    alignItems: "center",
-  },
-  planCardBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
-  studyBtn: {
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-    backgroundColor: "#0a7ea4",
-  },
-  studyBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    padding: 24,
-  },
-  modalBox: { backgroundColor: "#fff", borderRadius: 16, padding: 20 },
-  modalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 12 },
-  deleteWarningText: { fontSize: 14, color: "#444", marginBottom: 16 },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 12,
-  },
-  scheduleRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
-  scheduleBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#ddd",
-  },
-  scheduleBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  scheduleBtnTextActive: { fontWeight: "700", color: "#0a7ea4" },
-  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 8 },
-  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
-  cancelBtnText: { fontSize: 16, fontWeight: "600" },
-  saveBtn: { paddingVertical: 10, paddingHorizontal: 20, backgroundColor: "#0a7ea4", borderRadius: 10 },
-  saveBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-  deleteConfirmBtn: {
-    paddingVertical: 10,
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    backgroundColor: "#b02a37",
-    borderRadius: 10,
+    paddingTop: 54,
+    paddingBottom: 8,
   },
-  deleteConfirmText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  dateLabel: {
+    fontSize: 15, fontWeight: "700",
+    color: Palette.white60, letterSpacing: 0.3,
+  },
+  progressBadge: {
+    fontSize: 15, fontWeight: "700", color: Palette.white60,
+  },
+  progressBadgeDone: { color: Palette.amber500 },
+
+  // Sun glow overlay
+  sunGlow: {
+    position: "absolute", width: 144, height: 144, borderRadius: 72,
+    backgroundColor: "#f5a823",
+  },
+
+  // Progress bar
+  progressBar: {
+    paddingHorizontal: 20, paddingVertical: 12,
+    backgroundColor: Palette.navy800,
+    borderTopWidth: 1, borderTopColor: Palette.navy500,
+  },
+  progressBarLabel: {
+    fontSize: 13, color: Palette.white60, fontWeight: "600", marginBottom: 8,
+  },
+  track: {
+    height: 5, borderRadius: 3,
+    backgroundColor: Palette.navy500, overflow: "hidden",
+  },
+  fill: { height: 5, borderRadius: 3, backgroundColor: Palette.amber500 },
+  fillDone: { backgroundColor: Palette.amber300 },
+
+  // Plan card
+  planCard: {
+    marginHorizontal: 16, marginTop: 14,
+    borderRadius: 16, borderWidth: 1,
+    borderColor: "rgba(245,166,35,0.28)",
+    backgroundColor: Palette.navy700, padding: 16,
+  },
+  planCardHeader: {
+    flexDirection: "row", justifyContent: "space-between",
+    alignItems: "center", marginBottom: 8,
+  },
+  planCardLabel: {
+    fontSize: 11, fontWeight: "700", color: Palette.amber500, letterSpacing: 1,
+  },
+  planCardName: {
+    fontSize: 11, color: Palette.white40, flexShrink: 1, maxWidth: "55%",
+  },
+  planCardFocus: {
+    fontSize: 16, fontWeight: "700", color: "#fff", marginBottom: 4,
+  },
+  planCardRefs: {
+    fontSize: 13, color: Palette.white60, marginBottom: 12,
+  },
+  planCardBtn: {
+    paddingVertical: 10, borderRadius: 12,
+    backgroundColor: Palette.amber500, alignItems: "center",
+  },
+  planCardBtnText: { fontSize: 14, fontWeight: "700", color: Palette.navy800 },
+
+  // Habit list
+  listSection: { marginHorizontal: 16, marginTop: 16 },
+  listToggle: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: Palette.navy500,
+  },
+  listToggleLabel: {
+    fontSize: 11, fontWeight: "700",
+    color: Palette.white40, letterSpacing: 1,
+  },
+  listToggleChevron: { fontSize: 10, color: Palette.white40 },
+  habitRow: {
+    flexDirection: "row", alignItems: "center",
+    paddingVertical: 13, paddingHorizontal: 2,
+    borderBottomWidth: 1, borderBottomColor: Palette.navy500,
+  },
+  habitRowDone: { opacity: 0.60 },
+  habitCircle: {
+    width: 24, height: 24, borderRadius: 12,
+    borderWidth: 2, borderColor: Palette.white20,
+    marginRight: 12, alignItems: "center", justifyContent: "center",
+  },
+  habitCircleDone: { borderColor: Palette.amber500, backgroundColor: Palette.amber500 },
+  habitCircleCheck: { color: Palette.navy800, fontSize: 12, fontWeight: "900" },
+  habitName: {
+    flex: 1, fontSize: 16, fontWeight: "600", color: Palette.white95,
+  },
+  habitNameDone: {
+    textDecorationLine: "line-through", color: Palette.white40,
+  },
+  habitDeleteBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: Palette.white10,
+  },
+  habitDeleteText: { fontSize: 11, color: Palette.white40, fontWeight: "700" },
+
+  // FAB
+  fab: {
+    position: "absolute", bottom: 28, right: 24,
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: Palette.amber500,
+    alignItems: "center", justifyContent: "center",
+    shadowColor: Palette.amber500,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.50,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  fabText: { fontSize: 30, fontWeight: "300", color: Palette.navy800, lineHeight: 34 },
+
+  // Modals
+  overlay: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.72)",
+    justifyContent: "center", padding: 24,
+  },
+  modalBox: {
+    backgroundColor: Palette.navy700, borderRadius: 20, padding: 22,
+    borderWidth: 1, borderColor: Palette.navy500,
+  },
+  modalTitle: { fontSize: 20, fontWeight: "700", color: "#fff", marginBottom: 16 },
+  deleteWarning: { fontSize: 14, color: Palette.white60, marginBottom: 20 },
+  input: {
+    borderWidth: 1, borderColor: Palette.navy500, borderRadius: 12,
+    paddingVertical: 12, paddingHorizontal: 14,
+    fontSize: 16, color: "#fff", marginBottom: 12,
+    backgroundColor: Palette.navy800,
+  },
+  schedRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
+  schedBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 10,
+    borderWidth: 1, borderColor: Palette.navy500, alignItems: "center",
+  },
+  schedBtnActive: {
+    borderColor: Palette.amber500,
+    backgroundColor: "rgba(245,166,35,0.12)",
+  },
+  schedBtnText: { fontSize: 15, fontWeight: "600", color: Palette.white40 },
+  schedBtnTextActive: { color: Palette.amber500 },
+  modalActions: {
+    flexDirection: "row", justifyContent: "flex-end",
+    gap: 10, marginTop: 8,
+  },
+  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
+  cancelText: { fontSize: 16, fontWeight: "600", color: Palette.white60 },
+  saveBtn: {
+    paddingVertical: 10, paddingHorizontal: 24,
+    backgroundColor: Palette.amber500, borderRadius: 12,
+  },
+  saveBtnText: { fontSize: 16, fontWeight: "700", color: Palette.navy800 },
+  deleteBtn: {
+    paddingVertical: 10, paddingHorizontal: 20,
+    backgroundColor: Palette.error, borderRadius: 12,
+  },
+  deleteBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
 });

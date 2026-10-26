@@ -68,16 +68,16 @@ export default function MyJournalScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#fff" },
+  container: { flex: 1, padding: 20, backgroundColor: "#060f20" },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  title: { fontSize: 24, fontWeight: "800", marginBottom: 16 },
-  emptyText: { fontSize: 14, color: "#666", textAlign: "center" },
+  title: { fontSize: 24, fontWeight: "800", marginBottom: 16, color: "rgba(255,255,255,0.95)" },
+  emptyText: { fontSize: 14, color: "rgba(255,255,255,0.45)", textAlign: "center" },
   item: {
     paddingVertical: 10,
   },
-  reference: { fontSize: 16, fontWeight: "600", color: "#0a7ea4", marginBottom: 4 },
-  preview: { fontSize: 14, color: "#333", marginBottom: 4 },
-  timestamp: { fontSize: 12, color: "#666" },
-  separator: { height: 1, backgroundColor: "#eee" },
+  reference: { fontSize: 16, fontWeight: "600", color: "#f5a623", marginBottom: 4 },
+  preview: { fontSize: 14, color: "rgba(255,255,255,0.70)", marginBottom: 4 },
+  timestamp: { fontSize: 12, color: "rgba(255,255,255,0.40)" },
+  separator: { height: 1, backgroundColor: "#142030" },
 });
 

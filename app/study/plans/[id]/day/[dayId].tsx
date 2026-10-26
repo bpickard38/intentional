@@ -63,7 +63,6 @@ export default function DayDetailScreen() {
 
   // Ask a question
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<{ role: string; text: string }[]>([]);
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -101,6 +100,8 @@ export default function DayDetailScreen() {
     const totalSec = plan.minutesPerDay * 60;
     setTimerSec(totalSec);
     setTimerRunning(true);
+    // Restart only when a different plan/day loads, not on every object refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan?.id, day?.id]);
 
   useEffect(() => {
@@ -122,6 +123,8 @@ export default function DayDetailScreen() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
+    // The interval counts down via a functional update; re-running on every tick would recreate it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);
 
   const isCompleted = plan?.progress?.completedDayIds?.includes(dayId ?? "") ?? false;
@@ -169,7 +172,6 @@ export default function DayDetailScreen() {
       });
       const replyText = res.answer || "I'm not sure how to answer that right now.";
       setChatHistory((prev) => [...prev, { role: "assistant", text: replyText }]);
-      setAnswer(replyText);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setChatError(msg.length > 120 ? msg.slice(0, 120) + "…" : msg);
@@ -272,6 +274,7 @@ export default function DayDetailScreen() {
         onChangeText={scheduleJournalSave}
         multiline
         placeholder="What stood out to you? Any impressions or actions?"
+            placeholderTextColor="rgba(255,255,255,0.28)"
       />
       <Text style={styles.journalStatus}>
         {journalSaving ? "Saving…" : journalSavedAt ? `Saved at ${new Date(journalSavedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : ""}
@@ -297,6 +300,7 @@ export default function DayDetailScreen() {
           value={question}
           onChangeText={setQuestion}
           placeholder="Ask about today's reading…"
+              placeholderTextColor="rgba(255,255,255,0.28)"
           multiline
           editable={!chatSending}
         />
@@ -319,77 +323,79 @@ export default function DayDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  center: { flex: 1, backgroundColor: "#fff", justifyContent: "center", alignItems: "center", padding: 20 },
+  container: { flex: 1, backgroundColor: "#060f20" },
+  center: { flex: 1, backgroundColor: "#060f20", justifyContent: "center", alignItems: "center", padding: 20 },
   content: { padding: 20, paddingTop: 48, paddingBottom: 40 },
   backBtn: { alignSelf: "flex-start", marginBottom: 12 },
-  backBtnText: { fontSize: 16, color: "#0a7ea4", fontWeight: "600" },
+  backBtnText: { fontSize: 16, color: "#f5a623", fontWeight: "600" },
 
   timerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 },
   timerBox: { flex: 1 },
-  timerTrack: { height: 6, backgroundColor: "#deedf5", borderRadius: 3, overflow: "hidden", marginBottom: 4 },
-  timerFill: { height: "100%", backgroundColor: "#0a7ea4", borderRadius: 3 },
-  timerText: { fontSize: 22, fontWeight: "800", color: "#0a7ea4" },
-  timerBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: "#0a7ea4" },
-  timerBtnText: { fontSize: 14, fontWeight: "600", color: "#0a7ea4" },
+  timerTrack: { height: 6, backgroundColor: "#142030", borderRadius: 3, overflow: "hidden", marginBottom: 4 },
+  timerFill: { height: "100%", backgroundColor: "#f5a623", borderRadius: 3 },
+  timerText: { fontSize: 22, fontWeight: "800", color: "#f5a623" },
+  timerBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: "#f5a623" },
+  timerBtnText: { fontSize: 14, fontWeight: "600", color: "#f5a623" },
 
-  kicker: { fontSize: 12, color: "#0a7ea4", fontWeight: "600", marginBottom: 4 },
-  focus: { fontSize: 20, fontWeight: "800", marginBottom: 16 },
-  whyNextBox: { padding: 12, backgroundColor: "#f0f4f8", borderRadius: 10, marginBottom: 16 },
-  whyNextLabel: { fontSize: 12, fontWeight: "700", color: "#555", marginBottom: 4 },
-  whyNextText: { fontSize: 14, color: "#333" },
-  sectionTitle: { fontSize: 16, fontWeight: "700", marginTop: 16, marginBottom: 6 },
+  kicker: { fontSize: 12, color: "#f5a623", fontWeight: "600", marginBottom: 4 },
+  focus: { fontSize: 20, fontWeight: "800", marginBottom: 16, color: "rgba(255,255,255,0.95)" },
+  whyNextBox: { padding: 12, backgroundColor: "#091828", borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: "#142030" },
+  whyNextLabel: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.45)", marginBottom: 4 },
+  whyNextText: { fontSize: 14, color: "rgba(255,255,255,0.70)" },
+  sectionTitle: { fontSize: 16, fontWeight: "700", marginTop: 16, marginBottom: 6, color: "rgba(255,255,255,0.90)" },
   refRow: { marginBottom: 8 },
-  refText: { fontSize: 15, fontWeight: "600", color: "#0a7ea4" },
+  refText: { fontSize: 15, fontWeight: "600", color: "#f5a623" },
   linkRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
-  linkBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: "#e8f4f8" },
-  linkBtnText: { fontSize: 14, fontWeight: "600", color: "#0a7ea4" },
-  bodyText: { fontSize: 15, color: "#333", lineHeight: 22 },
-  bullet: { fontSize: 15, color: "#333", marginBottom: 4 },
+  linkBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: "rgba(245,166,35,0.12)", borderWidth: 1, borderColor: "#f5a623" },
+  linkBtnText: { fontSize: 14, fontWeight: "600", color: "#f5a623" },
+  bodyText: { fontSize: 15, color: "rgba(255,255,255,0.75)", lineHeight: 22 },
+  bullet: { fontSize: 15, color: "rgba(255,255,255,0.75)", marginBottom: 4 },
 
   journalInput: {
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
     borderRadius: 12,
     padding: 12,
     fontSize: 15,
     minHeight: 100,
     textAlignVertical: "top",
-    color: "#111",
+    color: "#fff",
+    backgroundColor: "#091828",
   },
-  journalStatus: { fontSize: 12, color: "#888", marginTop: 4, marginBottom: 4 },
+  journalStatus: { fontSize: 12, color: "rgba(255,255,255,0.40)", marginTop: 4, marginBottom: 4 },
 
   chatHistory: { gap: 8, marginBottom: 10 },
   chatBubble: { padding: 12, borderRadius: 12, maxWidth: "90%" },
-  chatBubbleUser: { backgroundColor: "#0a7ea4", alignSelf: "flex-end" },
-  chatBubbleAssistant: { backgroundColor: "#f0f4f8", alignSelf: "flex-start" },
-  chatBubbleText: { fontSize: 14, color: "#333", lineHeight: 20 },
-  chatBubbleTextUser: { color: "#fff" },
+  chatBubbleUser: { backgroundColor: "#f5a623", alignSelf: "flex-end" },
+  chatBubbleAssistant: { backgroundColor: "#142030", alignSelf: "flex-start" },
+  chatBubbleText: { fontSize: 14, color: "rgba(255,255,255,0.85)", lineHeight: 20 },
+  chatBubbleTextUser: { color: "#060f20", fontWeight: "600" },
   chatInputRow: { flexDirection: "row", gap: 8, alignItems: "flex-end" },
   chatInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
     borderRadius: 12,
     padding: 12,
     fontSize: 15,
     maxHeight: 120,
     textAlignVertical: "top",
-    color: "#111",
+    color: "#fff",
+    backgroundColor: "#091828",
   },
-  sendBtn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, backgroundColor: "#0a7ea4" },
-  sendBtnDisabled: { backgroundColor: "#9ac7da" },
-  sendBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  sendBtn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, backgroundColor: "#f5a623" },
+  sendBtnDisabled: { backgroundColor: "rgba(245,166,35,0.35)" },
+  sendBtnText: { fontSize: 15, fontWeight: "700", color: "#060f20" },
 
   completeBtn: {
     marginTop: 24,
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: "center",
-    backgroundColor: "#2b8a3e",
+    backgroundColor: "#f5a623",
   },
-  completeBtnDone: { backgroundColor: "#94d3a2" },
-  completeBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-  loadingText: { fontSize: 16, color: "#555" },
-  errorText: { fontSize: 14, color: "#b02a37", marginBottom: 8 },
+  completeBtnDone: { backgroundColor: "rgba(245,166,35,0.35)" },
+  completeBtnText: { fontSize: 16, fontWeight: "700", color: "#060f20" },
+  loadingText: { fontSize: 16, color: "rgba(255,255,255,0.55)" },
+  errorText: { fontSize: 14, color: "#e74c3c", marginBottom: 8 },
 });

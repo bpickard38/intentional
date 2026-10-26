@@ -1,5 +1,5 @@
 import type { Habit, HabitLog, HabitSchedule } from "@/src/core/types";
-import { todayKey } from "@/src/core/dates";
+import { isSameWeek, todayKey } from "@/src/core/dates";
 import { getJson, setJson } from "@/src/core/storage";
 
 const HABITS_KEY = "habits:v1";
@@ -136,15 +136,7 @@ export function getWeeklyProgress(
     0
   );
   const key = todayKey();
-  const thisWeekLogs = logs.filter((l) => {
-    const a = new Date(l.date);
-    const b = new Date(key);
-    const startA = new Date(a);
-    startA.setDate(a.getDate() - a.getDay());
-    const startB = new Date(b);
-    startB.setDate(b.getDate() - b.getDay());
-    return startA.getTime() === startB.getTime();
-  });
+  const thisWeekLogs = logs.filter((l) => isSameWeek(l.date, key));
   let doneThisWeek = 0;
   weekly.forEach((h) => {
     const count = thisWeekLogs.reduce(

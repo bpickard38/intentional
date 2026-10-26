@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { rateLimit } from "../_lib/rateLimit.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -18,6 +19,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
+  if (!rateLimit(req, res)) return;
 
   try {
     if (req.method !== "POST") {
@@ -138,7 +140,7 @@ The JSON must be complete, concise, and directly usable by a mobile app without 
     let raw;
     try {
       raw = JSON.parse(text);
-    } catch (err) {
+    } catch {
       console.error("study/generate: model returned non-JSON", text?.slice(0, 400));
       return send(res, 500, {
         error: "Model returned non-JSON",
@@ -156,9 +158,8 @@ The JSON must be complete, concise, and directly usable by a mobile app without 
     });
   } catch (err) {
     console.error("study/generate error", err);
-    const message = err instanceof Error ? err.message : String(err);
-    const trimmed = message.length > 160 ? message.slice(0, 160) + "…" : message;
-    return send(res, 500, { error: "Server error", details: trimmed });
+    // Full error is in the server logs; never echo upstream messages to clients.
+    return send(res, 500, { error: "Server error" });
   }
 }
 

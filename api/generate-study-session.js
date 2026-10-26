@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { rateLimit } from "./_lib/rateLimit.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -17,10 +18,6 @@ function churchScriptureUrl(ref, source) {
   if (!ref || typeof ref !== "string") return "https://www.churchofjesuschrist.org/study/scriptures?lang=eng";
   const encoded = encodeURIComponent(ref.trim()).replace(/%20/g, "+");
   return `https://www.churchofjesuschrist.org/study/scriptures/search?lang=eng&query=${encoded}`;
-}
-
-function churchConferenceUrl() {
-  return "https://www.churchofjesuschrist.org/study/general-conference?lang=eng";
 }
 
 function churchConferenceTalkUrl(title, speaker) {
@@ -46,6 +43,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
+  if (!rateLimit(req, res)) return;
 
   try {
     if (req.method !== "POST") {
@@ -147,7 +145,7 @@ ${uniquenessRule}
     let raw;
     try {
       raw = JSON.parse(text);
-    } catch (parseErr) {
+    } catch {
       console.error("Model returned non-JSON", text?.slice(0, 500));
       return send(res, 500, {
         error: "Model returned non-JSON",
@@ -423,8 +421,7 @@ ${uniquenessRule}
     return send(res, 200, normalized);
   } catch (err) {
     console.error(err);
-    const message = err instanceof Error ? err.message : String(err);
-    const safe = message.length > 120 ? message.slice(0, 120) + "…" : message;
-    return send(res, 500, { error: "Server error", details: safe });
+    // Full error is in the server logs; never echo upstream messages to clients.
+    return send(res, 500, { error: "Server error" });
   }
 }

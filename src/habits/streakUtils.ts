@@ -1,5 +1,5 @@
 import type { Habit, HabitLog } from "@/src/core/types";
-import { toLocalDateKey } from "@/src/core/dates";
+import { parseDateKey, toLocalDateKey } from "@/src/core/dates";
 
 export type HabitStreak = {
   habit: Habit;
@@ -59,12 +59,12 @@ export function computeStreak(
     return { current: 0, best: 0 };
   }
 
-  const today = new Date(todayKey);
+  const today = parseDateKey(todayKey);
 
   // Start from the earliest date where this habit was ever completed.
-  let earliest = new Date(logsWithHabit[0].date);
+  let earliest = parseDateKey(logsWithHabit[0].date);
   for (let i = 1; i < logsWithHabit.length; i += 1) {
-    const d = new Date(logsWithHabit[i].date);
+    const d = parseDateKey(logsWithHabit[i].date);
     if (d.getTime() < earliest.getTime()) earliest = d;
   }
 

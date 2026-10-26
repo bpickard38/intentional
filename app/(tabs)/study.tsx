@@ -11,7 +11,6 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Linking,
   Pressable,
   ScrollView,
@@ -27,7 +26,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import type { StudySession, StudyMode, ChatMessage, UserProfile, StudyDepth, ChapterStudyResponse, StudyPlanDoc, StudyPlanDay } from "@/src/core/types";
 import { todayKey } from "@/src/core/dates";
 import { getJson } from "@/src/core/storage";
-import { generateStudySession, studyChat, checkApiReachability, generateChapterStudy } from "@/src/ai/apiClient";
+import { generateStudySession, studyChat, generateChapterStudy } from "@/src/ai/apiClient";
 import { listPlans } from "@/src/study/planStorage";
 import { fallbackPlanV2, TOPIC_SUGGESTIONS } from "@/src/study/topics";
 import { ChapterPicker } from "@/src/features/study/ChapterPicker";
@@ -65,50 +64,6 @@ function formatSavedAt(isoString: string): string {
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
-
-function StudyCardSkeleton() {
-  return (
-    <View style={skeletonStyles.card}>
-      <View style={skeletonStyles.refLine} />
-      <View style={skeletonStyles.bigLine} />
-      <View style={skeletonStyles.line} />
-      <View style={skeletonStyles.line} />
-      <View style={[skeletonStyles.line, { width: "70%" }]} />
-    </View>
-  );
-}
-
-const skeletonStyles = StyleSheet.create({
-  card: {
-    borderWidth: 1,
-    borderColor: "#eee",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: "#fafafa",
-  },
-  refLine: {
-    height: 14,
-    width: 100,
-    backgroundColor: "#e0e0e0",
-    borderRadius: 4,
-    marginBottom: 8,
-  },
-  bigLine: {
-    height: 16,
-    width: "100%",
-    backgroundColor: "#e0e0e0",
-    borderRadius: 4,
-    marginBottom: 8,
-  },
-  line: {
-    height: 12,
-    width: "100%",
-    backgroundColor: "#e8e8e8",
-    borderRadius: 4,
-    marginBottom: 6,
-  },
-});
 
 const DEPTH_OPTIONS: { value: StudyDepth; label: string; mode: StudyMode }[] = [
   { value: "QUICK", label: "Quick", mode: "devotional" },
@@ -150,8 +105,6 @@ export default function StudyScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [expandedReadingCards, setExpandedReadingCards] = useState<Record<number, boolean>>({});
   const [deepDiveOpen, setDeepDiveOpen] = useState(false);
-  const [apiStatus, setApiStatus] = useState<{ ok: boolean; url: string; error?: string } | null>(null);
-  const [apiCheckLoading, setApiCheckLoading] = useState(false);
   const [chapterStudy, setChapterStudy] = useState<ChapterStudyResponse | null>(null);
   const [chapterFromCache, setChapterFromCache] = useState(false);
   const [activePlan, setActivePlan] = useState<StudyPlanDoc | null>(null);
@@ -373,29 +326,6 @@ export default function StudyScreen() {
       loadProfile().then(setProfile);
     }
   }, [session?.status, loadProfile]);
-
-  const runApiCheck = useCallback(async () => {
-    if (!process.env.EXPO_PUBLIC_API_URL?.trim()) {
-      setApiStatus(null);
-      return;
-    }
-    setApiCheckLoading(true);
-    setApiStatus(null);
-    try {
-      const result = await checkApiReachability();
-      setApiStatus({ ok: result.ok, url: result.url, error: result.error });
-    } finally {
-      setApiCheckLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (process.env.EXPO_PUBLIC_API_URL?.trim()) {
-      runApiCheck();
-    } else {
-      setApiStatus(null);
-    }
-  }, [runApiCheck]);
 
   useEffect(() => {
     if (!session?.id || session.status !== "in_progress" || !session.timerState?.isRunning) return;
@@ -1226,7 +1156,7 @@ export default function StudyScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: "#060f20" },
   setupContent: { padding: 20, paddingTop: 48, paddingBottom: 40 },
   titleRow: {
     flexDirection: "row",
@@ -1234,159 +1164,159 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  title: { fontSize: 28, fontWeight: "800" },
+  title: { fontSize: 28, fontWeight: "800", color: "rgba(255,255,255,0.95)" },
   activePlanCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#b8dcea",
-    backgroundColor: "#f0f9fc",
+    borderColor: "rgba(245,166,35,0.28)",
+    backgroundColor: "#091828",
     padding: 14,
     marginBottom: 14,
   },
-  activePlanLabel: { fontSize: 11, fontWeight: "700", color: "#0a7ea4", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
-  activePlanTitle: { fontSize: 12, color: "#555", marginBottom: 6 },
-  activePlanFocus: { fontSize: 15, fontWeight: "700", color: "#111", marginBottom: 4 },
-  activePlanRefs: { fontSize: 13, color: "#555", marginBottom: 10 },
+  activePlanLabel: { fontSize: 11, fontWeight: "700", color: "#f5a623", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
+  activePlanTitle: { fontSize: 12, color: "rgba(255,255,255,0.50)", marginBottom: 6 },
+  activePlanFocus: { fontSize: 15, fontWeight: "700", color: "rgba(255,255,255,0.95)", marginBottom: 4 },
+  activePlanRefs: { fontSize: 13, color: "rgba(255,255,255,0.55)", marginBottom: 10 },
   activePlanBtn: {
     paddingVertical: 9,
     borderRadius: 10,
-    backgroundColor: "#0a7ea4",
+    backgroundColor: "#f5a623",
     alignItems: "center",
   },
-  activePlanBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
-  orLabel: { textAlign: "center", fontSize: 13, color: "#888", marginBottom: 16 },
+  activePlanBtnText: { fontSize: 14, fontWeight: "700", color: "#060f20" },
+  orLabel: { textAlign: "center", fontSize: 13, color: "rgba(255,255,255,0.35)", marginBottom: 16 },
   titleActionsRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   myJournalBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#0a7ea4",
-    backgroundColor: "#e8f4f8",
+    borderColor: "#f5a623",
+    backgroundColor: "rgba(245,166,35,0.12)",
   },
-  myJournalBtnText: { fontSize: 13, fontWeight: "600", color: "#0a7ea4" },
-  label: { fontSize: 16, fontWeight: "600", marginBottom: 8 },
+  myJournalBtnText: { fontSize: 13, fontWeight: "600", color: "#f5a623" },
+  label: { fontSize: 16, fontWeight: "600", marginBottom: 8, color: "rgba(255,255,255,0.90)" },
   durationRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
-  durBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#ddd" },
-  durBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  durBtnText: { fontSize: 15, fontWeight: "600" },
-  durBtnTextActive: { color: "#0a7ea4", fontWeight: "700" },
+  durBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#142030" },
+  durBtnActive: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  durBtnText: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.65)" },
+  durBtnTextActive: { color: "#f5a623", fontWeight: "700" },
   modeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  modeBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#ddd" },
-  modeBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  modeBtnText: { fontSize: 14 },
-  modeBtnTextActive: { fontWeight: "700", color: "#0a7ea4" },
+  modeBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#142030" },
+  modeBtnActive: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  modeBtnText: { fontSize: 14, color: "rgba(255,255,255,0.65)" },
+  modeBtnTextActive: { fontWeight: "700", color: "#f5a623" },
   topicChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
-  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: "#ddd" },
-  chipActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  chipText: { fontSize: 14 },
-  chipTextActive: { fontWeight: "600", color: "#0a7ea4" },
-  input: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 16 },
-  envBanner: { backgroundColor: "#fff3cd", padding: 10, borderRadius: 8, marginBottom: 12 },
-  envBannerText: { fontSize: 12, color: "#856404" },
-  apiStatusBox: { backgroundColor: "#f0f4f8", padding: 12, borderRadius: 8, marginBottom: 12 },
-  apiStatusLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginBottom: 4 },
-  apiStatusUrl: { fontSize: 11, color: "#333", marginBottom: 4 },
-  apiStatusText: { fontSize: 14 },
-  apiStatusOk: { color: "#2b8a3e", fontWeight: "600" },
-  apiStatusErr: { color: "#c00", fontWeight: "600" },
-  apiStatusError: { fontSize: 12, color: "#c00", marginTop: 4 },
-  apiStatusHint: { fontSize: 11, color: "#666", marginTop: 6, fontStyle: "italic" },
-  apiCheckBtn: { marginTop: 8, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#0a7ea4", borderRadius: 8 },
-  apiCheckBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
-  errorText: { fontSize: 12, color: "#c00", marginBottom: 8 },
-  genBtn: { paddingVertical: 14, borderRadius: 14, alignItems: "center", backgroundColor: "#0a7ea4" },
-  genBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
-  helperText: { fontSize: 12, color: "#555", marginBottom: 8 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: "#142030" },
+  chipActive: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  chipText: { fontSize: 14, color: "rgba(255,255,255,0.65)" },
+  chipTextActive: { fontWeight: "600", color: "#f5a623" },
+  input: { borderWidth: 1, borderColor: "#142030", borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 16, color: "#fff", backgroundColor: "#091828" },
+  envBanner: { backgroundColor: "rgba(245,166,35,0.15)", padding: 10, borderRadius: 8, marginBottom: 12 },
+  envBannerText: { fontSize: 12, color: "#f5a623" },
+  apiStatusBox: { backgroundColor: "#091828", padding: 12, borderRadius: 8, marginBottom: 12 },
+  apiStatusLabel: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.45)", marginBottom: 4 },
+  apiStatusUrl: { fontSize: 11, color: "rgba(255,255,255,0.60)", marginBottom: 4 },
+  apiStatusText: { fontSize: 14, color: "rgba(255,255,255,0.80)" },
+  apiStatusOk: { color: "#2ecc71", fontWeight: "600" },
+  apiStatusErr: { color: "#e74c3c", fontWeight: "600" },
+  apiStatusError: { fontSize: 12, color: "#e74c3c", marginTop: 4 },
+  apiStatusHint: { fontSize: 11, color: "rgba(255,255,255,0.40)", marginTop: 6, fontStyle: "italic" },
+  apiCheckBtn: { marginTop: 8, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#f5a623", borderRadius: 8 },
+  apiCheckBtnText: { fontSize: 13, fontWeight: "600", color: "#060f20" },
+  errorText: { fontSize: 12, color: "#e74c3c", marginBottom: 8 },
+  genBtn: { paddingVertical: 14, borderRadius: 14, alignItems: "center", backgroundColor: "#f5a623" },
+  genBtnText: { fontSize: 16, fontWeight: "800", color: "#060f20" },
+  helperText: { fontSize: 12, color: "rgba(255,255,255,0.50)", marginBottom: 8 },
 
-  timerHeader: { padding: 12, backgroundColor: "#f0f4f8", borderBottomWidth: 1, borderBottomColor: "#ddd" },
-  timerText: { fontSize: 28, fontWeight: "800" },
-  stepLabel: { fontSize: 14, color: "#666", marginTop: 4 },
+  timerHeader: { padding: 12, backgroundColor: "#091828", borderBottomWidth: 1, borderBottomColor: "#142030" },
+  timerText: { fontSize: 28, fontWeight: "800", color: "rgba(255,255,255,0.95)" },
+  stepLabel: { fontSize: 14, color: "rgba(255,255,255,0.55)", marginTop: 4 },
   timerActions: { flexDirection: "row", gap: 8, marginTop: 8 },
-  smallBtn: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#0a7ea4", borderRadius: 8 },
-  smallBtnText: { fontSize: 14, fontWeight: "600", color: "#fff" },
+  smallBtn: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#f5a623", borderRadius: 8 },
+  smallBtnText: { fontSize: 14, fontWeight: "600", color: "#060f20" },
 
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 40 },
-  sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 8 },
+  sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 8, color: "rgba(255,255,255,0.90)" },
   themesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
-  themeChip: { backgroundColor: "#eee", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  themeChipText: { fontSize: 12 },
-  linkUnavailable: { fontSize: 14, color: "#999", fontStyle: "italic", marginTop: 6 },
-  card: { borderWidth: 1, borderColor: "#eee", borderRadius: 12, padding: 14, marginBottom: 10 },
-  scriptureRef: { fontSize: 15, fontWeight: "600", color: "#0a7ea4", marginBottom: 6 },
-  cardBigIdea: { fontSize: 15, fontWeight: "600", color: "#333", marginBottom: 6 },
+  themeChip: { backgroundColor: "#142030", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  themeChipText: { fontSize: 12, color: "rgba(255,255,255,0.70)" },
+  linkUnavailable: { fontSize: 14, color: "rgba(255,255,255,0.35)", fontStyle: "italic", marginTop: 6 },
+  card: { borderWidth: 1, borderColor: "#142030", borderRadius: 12, padding: 14, marginBottom: 10, backgroundColor: "#091828" },
+  scriptureRef: { fontSize: 15, fontWeight: "600", color: "#f5a623", marginBottom: 6 },
+  cardBigIdea: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.90)", marginBottom: 6 },
   readingActionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
-  toggleBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: "#ddd" },
-  toggleBtnText: { fontSize: 14, fontWeight: "600" },
-  keyMomentsSection: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#eee" },
+  toggleBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: "#142030" },
+  toggleBtnText: { fontSize: 14, fontWeight: "600", color: "rgba(255,255,255,0.65)" },
+  keyMomentsSection: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#142030" },
   keyVersesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
   crossRefChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
-  crossRefPill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "#e8f4f8" },
-  crossRefPillText: { fontSize: 13, color: "#0a7ea4", fontWeight: "600" },
-  lookForCard: { backgroundColor: "#f8f9fa", borderRadius: 10, padding: 12, marginTop: 16, marginBottom: 8 },
+  crossRefPill: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "rgba(245,166,35,0.12)" },
+  crossRefPillText: { fontSize: 13, color: "#f5a623", fontWeight: "600" },
+  lookForCard: { backgroundColor: "#091828", borderRadius: 10, padding: 12, marginTop: 16, marginBottom: 8 },
   pinnedFocusCard: {
-    backgroundColor: "#f8f9fa",
+    backgroundColor: "rgba(245,166,35,0.10)",
     borderRadius: 10,
     padding: 10,
     marginTop: 4,
     marginBottom: 4,
   },
-  lookForLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginBottom: 4 },
-  lookForText: { fontSize: 15, color: "#333" },
+  lookForLabel: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.45)", marginBottom: 4 },
+  lookForText: { fontSize: 15, color: "rgba(255,255,255,0.80)" },
   lookForRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
   },
-  ponderQuestion: { fontSize: 15, color: "#333", fontStyle: "italic", marginBottom: 12 },
-  scripturePassage: { fontSize: 15, color: "#333", lineHeight: 22, marginBottom: 8 },
+  ponderQuestion: { fontSize: 15, color: "rgba(255,255,255,0.75)", fontStyle: "italic", marginBottom: 12 },
+  scripturePassage: { fontSize: 15, color: "rgba(255,255,255,0.80)", lineHeight: 22, marginBottom: 8 },
   backgroundSection: { marginTop: 4, marginBottom: 4 },
-  backgroundToggle: { fontSize: 14, fontWeight: "600", color: "#666", marginBottom: 4 },
+  backgroundToggle: { fontSize: 14, fontWeight: "600", color: "rgba(255,255,255,0.55)", marginBottom: 4 },
   crossRefItem: { marginBottom: 8 },
-  crossRefChip: { fontSize: 14, color: "#0a7ea4", fontWeight: "600", paddingVertical: 4 },
-  crossRefExpand: { marginLeft: 12, marginTop: 4, padding: 10, backgroundColor: "#f8f9fa", borderRadius: 8 },
-  cardTitle: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
-  cardMeta: { fontSize: 14, color: "#666", marginBottom: 4 },
-  cardSummary: { fontSize: 14, color: "#444", marginBottom: 8 },
-  cardLabel: { fontSize: 12, fontWeight: "700", color: "#666", marginTop: 8, marginBottom: 4 },
-  bullet: { fontSize: 14, color: "#333", marginBottom: 2 },
-  linkText: { fontSize: 14, color: "#0a7ea4", marginBottom: 4 },
-  linkBtn: { alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#eee", borderRadius: 8, marginTop: 6 },
-  linkBtnText: { fontSize: 14, fontWeight: "600" },
-  journalLabel: { fontSize: 14, fontWeight: "600", marginTop: 8, marginBottom: 4 },
-  journalInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 12, fontSize: 15, minHeight: 56, textAlignVertical: "top" },
-  saveJournalBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 12, alignItems: "center", backgroundColor: "#0a7ea4" },
-  saveJournalBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-  journalStatus: { fontSize: 12, color: "#666", marginTop: 4 },
+  crossRefChip: { fontSize: 14, color: "#f5a623", fontWeight: "600", paddingVertical: 4 },
+  crossRefExpand: { marginLeft: 12, marginTop: 4, padding: 10, backgroundColor: "#091828", borderRadius: 8 },
+  cardTitle: { fontSize: 16, fontWeight: "700", marginBottom: 4, color: "rgba(255,255,255,0.90)" },
+  cardMeta: { fontSize: 14, color: "rgba(255,255,255,0.55)", marginBottom: 4 },
+  cardSummary: { fontSize: 14, color: "rgba(255,255,255,0.65)", marginBottom: 8 },
+  cardLabel: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.45)", marginTop: 8, marginBottom: 4 },
+  bullet: { fontSize: 14, color: "rgba(255,255,255,0.75)", marginBottom: 2 },
+  linkText: { fontSize: 14, color: "#f5a623", marginBottom: 4 },
+  linkBtn: { alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#142030", borderRadius: 8, marginTop: 6 },
+  linkBtnText: { fontSize: 14, fontWeight: "600", color: "rgba(255,255,255,0.80)" },
+  journalLabel: { fontSize: 14, fontWeight: "600", marginTop: 8, marginBottom: 4, color: "rgba(255,255,255,0.80)" },
+  journalInput: { borderWidth: 1, borderColor: "#142030", borderRadius: 10, padding: 12, fontSize: 15, minHeight: 56, textAlignVertical: "top", color: "#fff", backgroundColor: "#060f20" },
+  saveJournalBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 12, alignItems: "center", backgroundColor: "#f5a623" },
+  saveJournalBtnText: { fontSize: 16, fontWeight: "700", color: "#060f20" },
+  journalStatus: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4 },
   pinBtn: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
   },
-  pinText: { fontSize: 11, color: "#555" },
-  pinTextActive: { color: "#0a7ea4", fontWeight: "700" },
+  pinText: { fontSize: 11, color: "rgba(255,255,255,0.45)" },
+  pinTextActive: { color: "#f5a623", fontWeight: "700" },
 
   chatThread: { maxHeight: 180, marginBottom: 8 },
   chatBubble: { maxWidth: "85%", padding: 10, borderRadius: 12, marginBottom: 6 },
-  chatBubbleUser: { alignSelf: "flex-end", backgroundColor: "#0a7ea4" },
-  chatBubbleAssistant: { alignSelf: "flex-start", backgroundColor: "#eee" },
-  chatBubbleText: { fontSize: 14 },
+  chatBubbleUser: { alignSelf: "flex-end", backgroundColor: "#f5a623" },
+  chatBubbleAssistant: { alignSelf: "flex-start", backgroundColor: "#142030" },
+  chatBubbleText: { fontSize: 14, color: "rgba(255,255,255,0.90)" },
   chatInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  chatInput: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, fontSize: 15, textAlignVertical: "top" },
-  chatInputMultiline: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, fontSize: 15, minHeight: 56, maxHeight: 200, textAlignVertical: "top" },
-  sendBtn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: "#0a7ea4", borderRadius: 10 },
-  sendBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  chatInput: { flex: 1, borderWidth: 1, borderColor: "#142030", borderRadius: 10, padding: 10, fontSize: 15, textAlignVertical: "top", color: "#fff", backgroundColor: "#060f20" },
+  chatInputMultiline: { flex: 1, borderWidth: 1, borderColor: "#142030", borderRadius: 10, padding: 10, fontSize: 15, minHeight: 56, maxHeight: 200, textAlignVertical: "top", color: "#fff", backgroundColor: "#060f20" },
+  sendBtn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: "#f5a623", borderRadius: 10 },
+  sendBtnText: { fontSize: 15, fontWeight: "700", color: "#060f20" },
 
-  finishBtn: { marginTop: 24, paddingVertical: 14, borderRadius: 14, alignItems: "center", backgroundColor: "#2b8a3e" },
-  finishBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  finishBtn: { marginTop: 24, paddingVertical: 14, borderRadius: 14, alignItems: "center", backgroundColor: "#f5a623" },
+  finishBtnText: { fontSize: 16, fontWeight: "800", color: "#060f20" },
 
-  deepDiveContainer: { marginTop: 16, borderWidth: 1, borderColor: "#eee", borderRadius: 12, overflow: "hidden" },
-  deepDiveHeader: { padding: 14, backgroundColor: "#f8f9fa" },
-  deepDiveHeaderText: { fontSize: 15, fontWeight: "700" },
+  deepDiveContainer: { marginTop: 16, borderWidth: 1, borderColor: "#142030", borderRadius: 12, overflow: "hidden" },
+  deepDiveHeader: { padding: 14, backgroundColor: "#091828" },
+  deepDiveHeaderText: { fontSize: 15, fontWeight: "700", color: "rgba(255,255,255,0.90)" },
   deepDiveBody: { padding: 14, paddingTop: 0 },
-  talkCard: { marginTop: 12, padding: 12, backgroundColor: "#f8f9fa", borderRadius: 10 },
+  talkCard: { marginTop: 12, padding: 12, backgroundColor: "#091828", borderRadius: 10 },
 });

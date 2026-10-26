@@ -1,41 +1,56 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+export const Palette = {
+  navy900: '#020912',
+  navy800: '#060f20',
+  navy700: '#091828',
+  navy600: '#0f2240',
+  navy500: '#142030',
+  amber500: '#f5a623',
+  amber400: '#ffd54f',
+  amber300: '#ffd740',
+  gold100: '#fff8ed',
+  sand200: '#f8f0d8',
+  sand100: '#ede3c8',
+  cream50: '#faf6ef',
+  brown700: '#6b4e20',
+  brown500: '#b8882e',
+  white95: 'rgba(255,255,255,0.95)',
+  white80: 'rgba(255,255,255,0.80)',
+  white60: 'rgba(255,255,255,0.60)',
+  white40: 'rgba(255,255,255,0.40)',
+  white20: 'rgba(255,255,255,0.20)',
+  white10: 'rgba(255,255,255,0.10)',
+  error: '#e74c3c',
+} as const;
+
+const tintColorLight = Palette.amber500;
+const tintColorDark  = Palette.amber400;
 
 export const Colors = {
   light: {
     text: '#11181C',
-    background: '#fff',
+    background: Palette.cream50,
     tint: tintColorLight,
     icon: '#687076',
     tabIconDefault: '#687076',
     tabIconSelected: tintColorLight,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
+    text: Palette.white95,
+    background: Palette.navy800,
     tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    icon: Palette.white60,
+    tabIconDefault: Palette.white40,
+    tabIconSelected: Palette.amber400,
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {

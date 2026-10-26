@@ -111,8 +111,6 @@ export default function CreatePlanScreen() {
     []
   );
 
-  const ldsSources = (["bom", "dc", "pgp"] as const).filter(() => isLDS);
-
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Pressable onPress={() => router.back()} style={styles.backBtn}>
@@ -135,6 +133,7 @@ export default function CreatePlanScreen() {
       <TextInput
         style={styles.input}
         placeholder="Or type custom topic"
+            placeholderTextColor="rgba(255,255,255,0.28)"
         value={customTopic}
         onChangeText={(text) => { setCustomTopic(text); if (text.trim()) setTopic(""); }}
       />
@@ -216,30 +215,32 @@ export default function CreatePlanScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: "#060f20" },
   content: { padding: 20, paddingTop: 48, paddingBottom: 40 },
   backBtn: { alignSelf: "flex-start", marginBottom: 12 },
-  backBtnText: { fontSize: 16, color: "#0a7ea4", fontWeight: "600" },
-  title: { fontSize: 24, fontWeight: "800", marginBottom: 20 },
-  label: { fontSize: 16, fontWeight: "600", marginBottom: 8 },
+  backBtnText: { fontSize: 16, color: "#f5a623", fontWeight: "600" },
+  title: { fontSize: 24, fontWeight: "800", marginBottom: 20, color: "rgba(255,255,255,0.95)" },
+  label: { fontSize: 16, fontWeight: "600", marginBottom: 8, color: "rgba(255,255,255,0.90)" },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
   },
-  chipActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  chipText: { fontSize: 14 },
-  chipTextActive: { fontWeight: "700", color: "#0a7ea4" },
+  chipActive: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  chipText: { fontSize: 14, color: "rgba(255,255,255,0.65)" },
+  chipTextActive: { fontWeight: "700", color: "#f5a623" },
   input: {
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
     marginBottom: 20,
+    color: "#fff",
+    backgroundColor: "#091828",
   },
   optionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 },
   optionBtn: {
@@ -247,28 +248,28 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
   },
-  optionBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  optionBtnText: { fontSize: 15, fontWeight: "600" },
-  optionBtnTextActive: { color: "#0a7ea4", fontWeight: "700" },
+  optionBtnActive: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  optionBtnText: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.65)" },
+  optionBtnTextActive: { color: "#f5a623", fontWeight: "700" },
   toggleRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 },
   toggle: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
   },
-  toggleActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  toggleText: { fontSize: 14 },
-  toggleTextActive: { fontWeight: "700", color: "#0a7ea4" },
-  errorText: { fontSize: 14, color: "#b02a37", marginBottom: 12 },
+  toggleActive: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  toggleText: { fontSize: 14, color: "rgba(255,255,255,0.65)" },
+  toggleTextActive: { fontWeight: "700", color: "#f5a623" },
+  errorText: { fontSize: 14, color: "#e74c3c", marginBottom: 12 },
   primaryBtn: {
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: "center",
-    backgroundColor: "#0a7ea4",
+    backgroundColor: "#f5a623",
   },
-  primaryBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  primaryBtnText: { fontSize: 16, fontWeight: "700", color: "#060f20" },
 });

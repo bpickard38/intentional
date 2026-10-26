@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { rateLimit } from "../_lib/rateLimit.js";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -23,6 +24,7 @@ SUGGESTIONS_JSON:{"suggestedValues":[{"text":"...","description":"..."}],"sugges
 Only include SUGGESTIONS_JSON when you have enough context (usually after 3-4 exchanges). Set onboardingReady to true only when you have at least 2 values and 1 goal.`;
 
 export default async function handler(req, res) {
+  if (!rateLimit(req, res)) return;
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }

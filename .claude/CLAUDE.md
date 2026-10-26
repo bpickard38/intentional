@@ -23,7 +23,7 @@ npm run typecheck
 npx expo start -c
 ```
 
-No test suite is configured (`npm test` is a no-op).
+Unit tests use Vitest (`npm test`; files match `src/**/*.test.ts`). `vitest.config.mts` sets `TZ=America/Denver` so date-key/timezone bugs surface. Parse `YYYY-MM-DD` keys with `parseDateKey` from `src/core/dates.ts`, never `new Date(key)` (that parses as UTC).
 
 ## Architecture Overview
 

@@ -8,6 +8,15 @@ export function toLocalDateKey(date: Date): string {
   );
 }
 
+/**
+ * Parse a "YYYY-MM-DD" key as local midnight. `new Date("YYYY-MM-DD")` parses
+ * as UTC midnight, which lands on the previous day in timezones west of UTC.
+ */
+export function parseDateKey(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function todayKey(): string {
   return toLocalDateKey(new Date());
 }
@@ -32,8 +41,8 @@ export function startOfWeekKey(): string {
 }
 
 export function isSameWeek(dateA: string, dateB: string): boolean {
-  const a = new Date(dateA);
-  const b = new Date(dateB);
+  const a = parseDateKey(dateA);
+  const b = parseDateKey(dateB);
   const startA = new Date(a);
   startA.setDate(a.getDate() - a.getDay());
   const startB = new Date(b);

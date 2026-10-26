@@ -25,9 +25,9 @@ import Svg, {
 import { useFocusEffect, useRouter } from "expo-router";
 
 import type { Habit, HabitLog, WeeklyReflection } from "@/src/core/types";
-import { todayKey } from "@/src/core/dates";
+import { parseDateKey, todayKey } from "@/src/core/dates";
 import { listHabits, getAllLogs } from "@/src/habits/habitService";
-import { computeAllStreaks, type HabitStreak } from "@/src/habits/streakUtils";
+import { computeAllStreaks } from "@/src/habits/streakUtils";
 import { listGoals, listValues } from "@/src/goals/goalService";
 import {
   getCurrentWeekKey,
@@ -39,6 +39,7 @@ import { generateReflection } from "@/src/ai/apiClient";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const TABS = ["Path", "Streaks", "Reflect"] as const;
+
 type TabName = (typeof TABS)[number];
 
 // ── First-person perspective projection ──────────────────────────────────────
@@ -453,7 +454,7 @@ function StreaksSection({ habits, logs, loading }: { habits: Habit[]; logs: Habi
           <View style={ss.cardRow}>
             <Text style={ss.metric}>🔥 {item.current} current</Text>
             <Text style={ss.metric}>🏆 {item.best} best</Text>
-            {item.lastCompletedKey && <Text style={ss.metric}>Last: {new Date(item.lastCompletedKey).toLocaleDateString()}</Text>}
+            {item.lastCompletedKey && <Text style={ss.metric}>Last: {parseDateKey(item.lastCompletedKey).toLocaleDateString()}</Text>}
           </View>
         </Pressable>
       ))}
@@ -464,20 +465,20 @@ function StreaksSection({ habits, logs, loading }: { habits: Habit[]; logs: Habi
 const ss = StyleSheet.create({
   container: { padding: 16, paddingBottom: 48 },
   summaryRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
-  summaryCard: { flex: 1, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "#eee", backgroundColor: "#f8f9fa" },
-  summaryLabel: { fontSize: 11, color: "#555", marginBottom: 4 },
-  summaryValue: { fontSize: 15, fontWeight: "700" },
+  summaryCard: { flex: 1, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "#142030", backgroundColor: "#091828" },
+  summaryLabel: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginBottom: 4 },
+  summaryValue: { fontSize: 15, fontWeight: "700", color: "rgba(255,255,255,0.90)" },
   filterRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
-  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: "#ddd", backgroundColor: "#fff" },
-  chipOn: { borderColor: "#f5a623", backgroundColor: "#fff8ed" },
-  chipTxt: { fontSize: 13, color: "#444" },
-  chipTxtOn: { fontSize: 13, fontWeight: "700", color: "#c07800" },
-  helper: { fontSize: 14, color: "#666", marginTop: 12 },
-  card: { padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "#eee", marginBottom: 10, backgroundColor: "#fff" },
+  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: "#142030", backgroundColor: "#091828" },
+  chipOn: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  chipTxt: { fontSize: 13, color: "rgba(255,255,255,0.50)" },
+  chipTxtOn: { fontSize: 13, fontWeight: "700", color: "#f5a623" },
+  helper: { fontSize: 14, color: "rgba(255,255,255,0.45)", marginTop: 12 },
+  card: { padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "#142030", marginBottom: 10, backgroundColor: "#091828" },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
-  cardTitle: { fontSize: 16, fontWeight: "700" },
+  cardTitle: { fontSize: 16, fontWeight: "700", color: "rgba(255,255,255,0.90)" },
   cardRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  metric: { fontSize: 13, color: "#555" },
+  metric: { fontSize: 13, color: "rgba(255,255,255,0.55)" },
 });
 
 // ── Reflect section ───────────────────────────────────────────────────────────
@@ -505,7 +506,7 @@ function ReflectSection({ habits, logs }: { habits: Habit[]; logs: HabitLog[] })
       const wk = getCurrentWeekKey();
       const now = new Date();
       const sow = new Date(now); sow.setDate(now.getDate() - now.getDay()); sow.setHours(0,0,0,0);
-      const weekLogs = logs.filter(l => new Date(l.date) >= sow);
+      const weekLogs = logs.filter(l => parseDateKey(l.date) >= sow);
       const counts: Record<string, number> = {};
       for (const lg of weekLogs) for (const id of lg.completedHabitIds) counts[id] = (counts[id] ?? 0) + 1;
       const completedHabits = habits.filter(h => !h.archived && counts[h.id]).map(h => ({ name: h.title ?? h.name, count: counts[h.id] }));
@@ -536,7 +537,7 @@ function ReflectSection({ habits, logs }: { habits: Habit[]; logs: HabitLog[] })
         <View style={rs.card}>
           {reflection.summary ? <Text style={rs.summary}>{reflection.summary}</Text> : null}
           <Text style={rs.question}>{reflection.question}</Text>
-          <TextInput style={rs.input} placeholder="Write your reflection…" value={answer} onChangeText={setAnswer} multiline numberOfLines={4} textAlignVertical="top" />
+          <TextInput style={rs.input} placeholder="Write your reflection…" placeholderTextColor="rgba(255,255,255,0.28)" value={answer} onChangeText={setAnswer} multiline numberOfLines={4} textAlignVertical="top" />
           <Pressable onPress={handleSave} style={[rs.btn, (!answer.trim() || saving) && rs.btnOff]} disabled={saving || !answer.trim()}>
             <Text style={rs.btnText}>{saving ? "Saving…" : "Save"}</Text>
           </Pressable>
@@ -568,22 +569,22 @@ function ReflectSection({ habits, logs }: { habits: Habit[]; logs: HabitLog[] })
 
 const rs = StyleSheet.create({
   container: { padding: 16, paddingBottom: 48 },
-  heading: { fontSize: 18, fontWeight: "700", marginBottom: 12 },
-  card: { padding: 16, borderRadius: 16, borderWidth: 1, borderColor: "#e0e7ff", backgroundColor: "#f8f9ff", marginBottom: 16 },
-  summary: { fontSize: 14, color: "#555", lineHeight: 20, marginBottom: 12 },
-  question: { fontSize: 16, fontWeight: "700", color: "#1a1a2e", marginBottom: 12, lineHeight: 22 },
-  input: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 12, fontSize: 15, minHeight: 100, backgroundColor: "#fff", marginBottom: 12 },
-  empty: { padding: 20, borderRadius: 16, borderWidth: 1, borderColor: "#eee", alignItems: "center", gap: 12 },
-  emptyText: { fontSize: 15, color: "#555", textAlign: "center" },
-  btn: { paddingVertical: 12, paddingHorizontal: 24, backgroundColor: "#0a7ea4", borderRadius: 12, alignItems: "center" },
+  heading: { fontSize: 18, fontWeight: "700", marginBottom: 12, color: "rgba(255,255,255,0.90)" },
+  card: { padding: 16, borderRadius: 16, borderWidth: 1, borderColor: "rgba(245,166,35,0.25)", backgroundColor: "#091828", marginBottom: 16 },
+  summary: { fontSize: 14, color: "rgba(255,255,255,0.55)", lineHeight: 20, marginBottom: 12 },
+  question: { fontSize: 16, fontWeight: "700", color: "rgba(255,255,255,0.90)", marginBottom: 12, lineHeight: 22 },
+  input: { borderWidth: 1, borderColor: "#142030", borderRadius: 10, padding: 12, fontSize: 15, minHeight: 100, backgroundColor: "#060f20", color: "#fff", marginBottom: 12 },
+  empty: { padding: 20, borderRadius: 16, borderWidth: 1, borderColor: "#142030", alignItems: "center", gap: 12, backgroundColor: "#091828" },
+  emptyText: { fontSize: 15, color: "rgba(255,255,255,0.55)", textAlign: "center" },
+  btn: { paddingVertical: 12, paddingHorizontal: 24, backgroundColor: "#f5a623", borderRadius: 12, alignItems: "center" },
   btnOff: { opacity: 0.5 },
-  btnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
-  error: { fontSize: 13, color: "#dc3545", textAlign: "center" },
-  pastCard: { padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "#eee", marginBottom: 10 },
-  pastWeek: { fontSize: 12, color: "#999", marginBottom: 4 },
-  pastQ: { fontSize: 14, fontWeight: "600", color: "#333", marginBottom: 6 },
-  pastA: { fontSize: 14, color: "#555", lineHeight: 20 },
-  noAnswer: { fontSize: 13, color: "#aaa", fontStyle: "italic" },
+  btnText: { fontSize: 15, fontWeight: "700", color: "#060f20" },
+  error: { fontSize: 13, color: "#e74c3c", textAlign: "center" },
+  pastCard: { padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "#142030", marginBottom: 10, backgroundColor: "#091828" },
+  pastWeek: { fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 4 },
+  pastQ: { fontSize: 14, fontWeight: "600", color: "rgba(255,255,255,0.80)", marginBottom: 6 },
+  pastA: { fontSize: 14, color: "rgba(255,255,255,0.55)", lineHeight: 20 },
+  noAnswer: { fontSize: 13, color: "rgba(255,255,255,0.30)", fontStyle: "italic" },
 });
 
 // ── Main Path screen ──────────────────────────────────────────────────────────

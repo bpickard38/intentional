@@ -42,6 +42,8 @@ export function StudyProgressBar({ loading, label }: Props) {
         }
       });
     }
+    // Only react to loading transitions; `progress` is a stable Animated.Value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
   if (!visible) return null;

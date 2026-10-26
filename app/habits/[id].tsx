@@ -11,7 +11,7 @@ import {
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import type { Habit, HabitLog, HabitSchedule } from "@/src/core/types";
-import { todayKey } from "@/src/core/dates";
+import { parseDateKey, todayKey } from "@/src/core/dates";
 import { getAllLogs, listHabits, updateHabit, deleteHabit } from "@/src/habits/habitService";
 import { computeStreak, isCompleted } from "@/src/habits/streakUtils";
 
@@ -130,7 +130,7 @@ export default function HabitDetailScreen() {
           {streak.lastCompletedKey && (
             <Text style={styles.lastCompletedText}>
               Last completed on{" "}
-              {new Date(streak.lastCompletedKey).toLocaleDateString()}
+              {parseDateKey(streak.lastCompletedKey).toLocaleDateString()}
             </Text>
           )}
 
@@ -143,15 +143,15 @@ export default function HabitDetailScreen() {
             columnWrapperStyle={styles.gridRow}
             renderItem={({ item }) => {
               const bg = !item.scheduled
-                ? "#f1f3f5"
+                ? "#142030"
                 : item.completed
-                ? "#2b8a3e"
-                : "#fff";
+                ? "#f5a623"
+                : "#091828";
               const border = !item.scheduled
-                ? "#dde2e6"
+                ? "#142030"
                 : item.completed
-                ? "#2b8a3e"
-                : "#ced4da";
+                ? "#ffd54f"
+                : "rgba(255,255,255,0.20)";
               return (
                 <View style={[styles.dayCell, { backgroundColor: bg, borderColor: border }]}>
                   {/* Empty square, color indicates state */}
@@ -161,11 +161,11 @@ export default function HabitDetailScreen() {
           />
 
           <View style={styles.legendRow}>
-            <View style={[styles.legendDot, { backgroundColor: "#2b8a3e" }]} />
+            <View style={[styles.legendDot, { backgroundColor: "#f5a623" }]} />
             <Text style={styles.legendLabel}>Completed</Text>
-            <View style={[styles.legendDot, { backgroundColor: "#fff", borderWidth: 1, borderColor: "#ced4da" }]} />
-            <Text style={styles.legendLabel}>Scheduled, not completed</Text>
-            <View style={[styles.legendDot, { backgroundColor: "#f1f3f5" }]} />
+            <View style={[styles.legendDot, { backgroundColor: "#091828", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)" }]} />
+            <Text style={styles.legendLabel}>Scheduled, not done</Text>
+            <View style={[styles.legendDot, { backgroundColor: "#142030" }]} />
             <Text style={styles.legendLabel}>Not scheduled</Text>
           </View>
 
@@ -199,6 +199,7 @@ export default function HabitDetailScreen() {
             <TextInput
               style={styles.input}
               placeholder="Habit title"
+              placeholderTextColor="rgba(255,255,255,0.30)"
               value={editTitle}
               onChangeText={setEditTitle}
             />
@@ -329,10 +330,10 @@ export default function HabitDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 48, backgroundColor: "#fff" },
-  title: { fontSize: 28, fontWeight: "800", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#555", marginBottom: 12 },
-  errorText: { fontSize: 16, color: "#b02a37" },
+  container: { flex: 1, padding: 20, paddingTop: 48, backgroundColor: "#060f20" },
+  title: { fontSize: 28, fontWeight: "800", marginBottom: 4, color: "rgba(255,255,255,0.95)" },
+  subtitle: { fontSize: 14, color: "rgba(255,255,255,0.50)", marginBottom: 12 },
+  errorText: { fontSize: 16, color: "#e74c3c" },
   streakRow: {
     flexDirection: "row",
     gap: 8,
@@ -344,13 +345,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#eee",
-    backgroundColor: "#f8f9fa",
+    borderColor: "#142030",
+    backgroundColor: "#091828",
   },
-  streakLabel: { fontSize: 12, color: "#555", marginBottom: 4 },
-  streakValue: { fontSize: 18, fontWeight: "700" },
-  lastCompletedText: { fontSize: 13, color: "#555", marginBottom: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 8, marginTop: 4 },
+  streakLabel: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 4 },
+  streakValue: { fontSize: 18, fontWeight: "700", color: "rgba(255,255,255,0.90)" },
+  lastCompletedText: { fontSize: 13, color: "rgba(255,255,255,0.50)", marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 8, marginTop: 4, color: "rgba(255,255,255,0.90)" },
   gridRow: {
     justifyContent: "flex-start",
     gap: 4,
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 999,
   },
-  legendLabel: { fontSize: 12, color: "#555" },
+  legendLabel: { fontSize: 12, color: "rgba(255,255,255,0.45)" },
   actionsRow: {
     flexDirection: "row",
     gap: 10,
@@ -385,33 +386,35 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
     alignItems: "center",
   },
-  secondaryBtnText: { fontSize: 15, fontWeight: "600" },
+  secondaryBtnText: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.80)" },
   destructiveBtn: {
     flex: 1,
     paddingVertical: 10,
     borderRadius: 14,
-    backgroundColor: "#b02a37",
+    backgroundColor: "#e74c3c",
     alignItems: "center",
   },
   destructiveBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(0,0,0,0.72)",
     justifyContent: "center",
     padding: 24,
   },
-  modalBox: { backgroundColor: "#fff", borderRadius: 16, padding: 20 },
-  modalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 12 },
+  modalBox: { backgroundColor: "#091828", borderRadius: 16, padding: 20, borderWidth: 1, borderColor: "#142030" },
+  modalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 12, color: "rgba(255,255,255,0.95)" },
   input: {
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
     marginBottom: 12,
+    color: "#fff",
+    backgroundColor: "#060f20",
   },
   scheduleRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
   scheduleBtn: {
@@ -419,25 +422,25 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#142030",
   },
-  scheduleBtnActive: { borderColor: "#0a7ea4", backgroundColor: "#e8f4f8" },
-  scheduleBtnTextActive: { fontWeight: "700", color: "#0a7ea4" },
+  scheduleBtnActive: { borderColor: "#f5a623", backgroundColor: "rgba(245,166,35,0.12)" },
+  scheduleBtnTextActive: { fontWeight: "700", color: "#f5a623" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 8 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
-  cancelBtnText: { fontSize: 16, fontWeight: "600" },
+  cancelBtnText: { fontSize: 16, fontWeight: "600", color: "rgba(255,255,255,0.55)" },
   saveBtn: {
     paddingVertical: 10,
     paddingHorizontal: 20,
-    backgroundColor: "#0a7ea4",
+    backgroundColor: "#f5a623",
     borderRadius: 10,
   },
-  saveBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-  deleteWarningText: { fontSize: 14, color: "#444", marginBottom: 16 },
+  saveBtnText: { fontSize: 16, fontWeight: "700", color: "#060f20" },
+  deleteWarningText: { fontSize: 14, color: "rgba(255,255,255,0.55)", marginBottom: 16 },
   deleteConfirmBtn: {
     paddingVertical: 10,
     paddingHorizontal: 20,
-    backgroundColor: "#b02a37",
+    backgroundColor: "#e74c3c",
     borderRadius: 10,
   },
   deleteConfirmText: { fontSize: 16, fontWeight: "700", color: "#fff" },

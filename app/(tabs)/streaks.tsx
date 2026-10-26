@@ -3,7 +3,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 
 import type { Habit, HabitLog } from "@/src/core/types";
-import { todayKey } from "@/src/core/dates";
+import { parseDateKey, todayKey } from "@/src/core/dates";
 import { listHabits, getAllLogs } from "@/src/habits/habitService";
 import {
   computeAllStreaks,
@@ -121,7 +121,7 @@ export default function StreaksScreen() {
                 {item.lastCompletedKey && (
                   <Text style={styles.cardMetric}>
                     Last:{" "}
-                    {new Date(item.lastCompletedKey).toLocaleDateString()}
+                    {parseDateKey(item.lastCompletedKey).toLocaleDateString()}
                   </Text>
                 )}
               </View>
