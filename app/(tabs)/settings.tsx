@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import type { FaithTradition, UserProfile, StudyDisplayMode, StudyDepth } from "@/src/core/types";
 import { getJson, setJson, removeKey } from "@/src/core/storage";
 import { Palette } from "@/constants/theme";
+import { getApiBaseUrl } from "@/src/ai/apiClient";
 
 const PROFILE_KEY       = "profile:v1";
 const STUDY_SESSIONS_KEY = "studySessions:v1";
@@ -112,7 +113,7 @@ export default function SettingsScreen() {
       <View style={s.debugRow}>
         <Text style={s.debugLabel}>API</Text>
         <Text style={s.debugValue} numberOfLines={1}>
-          {process.env.EXPO_PUBLIC_API_URL?.trim() || "(not set)"}
+          {getApiBaseUrl() ?? "(not set)"}
         </Text>
       </View>
 

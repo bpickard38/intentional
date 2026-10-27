@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import type {
   StudyPlan,
   StudyPlanV2,
@@ -18,7 +19,12 @@ import {
 } from "@/src/study/planStorage";
 import { addToStudyHistory, getRecentlyStudiedRefs } from "@/src/study/studyHistory";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
+const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ?? "";
+// The web build is served from the same Vercel project as the API, so it can fall
+// back to its own origin when EXPO_PUBLIC_API_URL isn't set at build time.
+const API_URL =
+  ENV_API_URL ||
+  (Platform.OS === "web" && typeof window !== "undefined" ? window.location.origin : "");
 
 // Path prefix: default "api" -> /api/study-chat. Set EXPO_PUBLIC_API_PATH=root if API is deployed with api folder as project root (routes at /study-chat).
 const API_PATH = (process.env.EXPO_PUBLIC_API_PATH ?? "api").trim().toLowerCase();
