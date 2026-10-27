@@ -2,6 +2,8 @@
 
 **A habit tracker and AI-guided scripture study app built with React Native and Expo.**
 
+**[Try the live web demo →](https://intentional-lac.vercel.app)** (your data stays in your browser)
+
 Intentional helps people build daily habits and keep a consistent study practice. It tracks streaks, generates personalized study sessions and multi-day reading plans with an LLM, and turns a week of habit data into a written reflection.
 
 <p align="center">
